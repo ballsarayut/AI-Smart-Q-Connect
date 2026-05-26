@@ -153,7 +153,11 @@ export default function Admin() {
         setTestLineResult({ success: true, message: data.message });
       }
     } catch (err: any) {
-      setTestLineResult({ error: err.message });
+      if (err && err.message && err.message.toLowerCase().includes('failed to fetch')) {
+        setTestLineResult({ error: "ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้ (Server อาจกำลังรีสตาร์ท หรือส่วนขยายเบราว์เซอร์เช่น AdBlock อาจทำการบล็อกการเชื่อมต่อ)"});
+      } else {
+        setTestLineResult({ error: err.message });
+      }
     } finally {
       setTestLineLoading(false);
     }

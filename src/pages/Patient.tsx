@@ -7,6 +7,7 @@ import { Link } from 'react-router-dom';
 import { APIProvider, useMapsLibrary } from '@vis.gl/react-google-maps';
 import LineSimulator from '../components/LineSimulator';
 import liff from '@line/liff';
+import { initLiff } from '../lib/liffHelper';
 
 const API_KEY = process.env.GOOGLE_MAPS_PLATFORM_KEY || '';
 
@@ -225,23 +226,19 @@ export default function Patient() {
         if (data.campaign_end_date) setCampaignEndDate(data.campaign_end_date);
         
         if (data.line_liff_id && data.line_liff_id.trim() !== '') {
-          const isNestedIframe = window.self !== window.top;
-          liff.init({ 
-            liffId: data.line_liff_id,
-            withLoginOnExternalBrowser: !isNestedIframe 
-          }).then(() => {
-            setLiffInitialized(true);
-            if (liff.isLoggedIn()) {
-              liff.getProfile().then(profile => {
-                setLineUid(profile.userId);
-                setLiffProfileName(profile.displayName);
-              }).catch(err => console.error("LIFF get profile error", err));
-            } else if (isNestedIframe) {
-              setLiffError("ระบบไม่สามารถล็อกอินเข้า LINE อัตโนมัติได้เมื่อเปิดผ่านหน้าต่างจำลอง (AI Studio) กรุณากดปุ่ม ↗ มุมบนขวาเพื่อเปิดแอปในหน้าต่างใหม่ (หากเปิดในแพลตฟอร์มปกติจะล็อกอินเพื่อรับการแจ้งเตือนอัตโนมัติ)");
-            }
-          }).catch(err => {
-            console.error("LIFF init error", err);
-          });
+          initLiff(data.line_liff_id.trim())
+            .then(() => {
+              setLiffInitialized(true);
+              if (liff.isLoggedIn()) {
+                liff.getProfile().then(profile => {
+                  setLineUid(profile.userId);
+                  setLiffProfileName(profile.displayName);
+                }).catch(err => console.error("LIFF get profile error", err));
+              }
+            })
+            .catch(err => {
+              console.error("LIFF init error in Patient", err);
+            });
         }
       });
 
@@ -387,21 +384,46 @@ export default function Patient() {
                         </p>
                       </div>
                     ) : (
-                      <div className="w-full flex-col gap-2">
-                        {liffError ? (
-                          <div className="w-full border-2 border-amber-200 rounded-xl p-4 bg-amber-50 flex flex-col gap-2 transition-all">
-                            <span className="font-bold flex items-center gap-2 text-amber-700 text-sm">
-                              <AlertCircle className="w-5 h-5" /> คำเตือนการทำงาน
-                            </span>
-                            <p className="text-xs text-amber-700 font-medium">{liffError}</p>
-                          </div>
-                        ) : (
-                          <div className="w-full border-2 border-slate-200 rounded-xl p-4 bg-slate-50 flex items-center justify-between gap-4 transition-all">
-                            <p className="text-xs text-slate-500 font-medium">กำลังเตรียมเข้าสู่ระบบ LINE อัตโนมัติ เพื่อรับการแจ้งเตือน...</p>
-                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-green-500"></div>
-                          </div>
-                        )}
-                      </div>
+                            <div className="w-full flex flex-col gap-2">
+                              <div className="w-full border-2 border-slate-200 rounded-xl p-4 bg-slate-50 flex items-center justify-between gap-4 transition-all">
+                                <div>
+                                  <p className="text-xs text-slate-500 font-medium">เข้าสู่ระบบด้วยบัญชี LINE ของคุณเพื่อรับการแจ้งเตือน</p>
+                                  <div className="mt-2 flex items-center gap-2">
+                                    <input 
+                                      type="text" 
+                                      placeholder="หรือกรอก User ID ด้วยตนเอง (ขึ้นต้นด้วย U...)" 
+                                      className="border-2 border-slate-200 rounded-lg p-2 text-xs w-full max-w-[200px] outline-none focus:border-teal-500"
+                                      onChange={(e) => {
+                                        setLineUid(e.target.value);
+                                        if (e.target.value.startsWith('U')) {
+                                          setLiffProfileName('คุณ (กรอกเอง)');
+                                        } else if (!e.target.value) {
+                                          setLiffProfileName('');
+                                        }
+                                      }}
+                                    />
+                                  </div>
+                                </div>
+                                <button 
+                                  type="button"
+                                  onClick={() => {
+                                    try {
+                                      if (window.self !== window.top) {
+                                        setLiffError("สถานะ: จำลองใน AI Studio - โปรดกรอก User ID ในช่องซ้ายมือแทน หรือเปิดแท็บใหม่");
+                                      } else {
+                                        liff.login();
+                                      }
+                                    } catch (e) {
+                                      liff.login();
+                                    }
+                                  }}
+                                  className="bg-[#06C755] hover:bg-[#05b34c] text-white px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm whitespace-nowrap active:scale-95 transition-all flex items-center gap-2"
+                                >
+                                  ล็อกอิน LINE
+                                </button>
+                              </div>
+                              {liffError && <p className="text-xs text-amber-600 font-semibold mt-1 px-1">{liffError}</p>}
+                            </div>
                     )}
                   </div>
                 )}
