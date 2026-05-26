@@ -269,6 +269,8 @@ export default function Patient() {
     socket.on('settings_updated', (data: any) => {
       if (data.campaign_title) setCampaignTitle(data.campaign_title);
       if (data.campaign_desc) setCampaignDesc(data.campaign_desc);
+      if (data.campaign_start_date) setCampaignStartDate(data.campaign_start_date);
+      if (data.campaign_end_date) setCampaignEndDate(data.campaign_end_date);
     });
 
     socket.on('services_updated', (updated: Service[]) => {

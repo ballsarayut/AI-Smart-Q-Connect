@@ -351,6 +351,21 @@ app.post("/api/queues", (req, res) => {
   let validSlotId = slot_id;
   const isCampaign = service_id === 'service_campaign' ? 1 : 0;
   
+  if (isCampaign) {
+    const campaignStartRecord = db.prepare("SELECT value FROM system_settings WHERE key = 'campaign_start_date'").get() as any;
+    const campaignEndRecord = db.prepare("SELECT value FROM system_settings WHERE key = 'campaign_end_date'").get() as any;
+    const campStart = campaignStartRecord?.value || new Date().toISOString().split('T')[0];
+    const campEnd = campaignEndRecord?.value;
+
+    const checkDate = appointment_date || new Date().toISOString().split('T')[0];
+    if (checkDate < campStart) {
+       return res.status(400).json({ error: `ไม่สามารถจองคิวนอกเวลาที่กำหนดได้ (เปิดจองตั้งแต่ ${campStart})` });
+    }
+    if (campEnd && checkDate > campEnd) {
+       return res.status(400).json({ error: `ไม่สามารถจองคิวนอกเวลาที่กำหนดได้ (สิ้นสุดการจอง ${campEnd})` });
+    }
+  }
+  
   // For Mass Campaign Booking, do automatic load balancing if slot isn't specifically provided
   if (isCampaign && !validSlotId) {
     const today = new Date().toISOString().split('T')[0];
