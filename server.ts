@@ -45,7 +45,9 @@ db.exec(`
     preferred_time TEXT,
     is_fast_track INTEGER DEFAULT 0,
     is_campaign INTEGER DEFAULT 0,
-    appointment_date TEXT
+    appointment_date TEXT,
+    notified_approaching INTEGER DEFAULT 0,
+    notified_1hr INTEGER DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS time_slots (
@@ -224,7 +226,7 @@ function generateQueueNumber(serviceId: string, isFastTrack: boolean = false) {
 }
 
 // Trigger LINE notification (simulated + real if token is provided)
-async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' | 'Completed' | 'Skipped' | 'No-show') {
+async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' | 'Completed' | 'Skipped' | 'No-show' | 'Approaching' | 'Approaching_1hr') {
   if (!queue) return;
   
   // Get map link from settings
@@ -259,6 +261,10 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
     text = `⚠️ แจ้งเตือนการข้ามคิว (รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n👉 เนื่องจากพยาบาลเรียกคิวแล้วไม่พบท่าน คิวจึงถูกข้ามชั่วคราว กรุณาติดต่อเคาน์เตอร์พยาบาลค่ะ`;
   } else if (action === 'No-show') {
     text = `🚨 แจ้งเตือน: คุณขาดนัด${queue.service_name} (ที่รพ.สต.)\n• หมายเลขคิว: ${queue.queue_number}\n👉 ท่านไม่ได้มาแสดงตัวตามนัดหมายในวันนี้ กรุณาติดต่อสายด่วน รพ.สต. เพื่อนัดหมายใหม่ หรือรับยาป้องกันการขาดยาค่ะ`;
+  } else if (action === 'Approaching') {
+    text = `⏳ ใกล้ถึงคิวของท่านแล้ว! (รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n👉 อีกประมาณ 3 คิว จะถึงคิวของท่าน กรุณาเตรียมตัวบริเวณจุดรอพักค่ะ`;
+  } else if (action === 'Approaching_1hr') {
+    text = `⏰ แจ้งเตือนล่วงหน้า 1 ชั่วโมง (รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n• เวลาที่นัดหมาย: ${queue.preferred_time}\n👉 กรุณามาถึงก่อนเวลา เพื่อเตรียมตัวคัดกรองเบื้องต้นค่ะ`;
   }
 
   // Save notification log in SQLite for UI Real-time Simulation Feed
@@ -314,22 +320,7 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
         console.log('[LINE Messaging API] Push Response:', resData);
       }
 
-      // 2. Also send to standard Admin User ID if configured (for developer testing)
-      const adminUidRecord = db.prepare("SELECT value FROM system_settings WHERE key = 'line_admin_uid'").get() as any;
-      const adminUid = adminUidRecord?.value || "";
-      if (adminUid && adminUid.trim() !== "" && adminUid !== recipientUid) {
-        console.log(`[LINE Messaging API] Sending PUSH copy to Admin ID: ${adminUid}`);
-        await fetch('https://api.line.me/v2/bot/message/push', {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            to: adminUid,
-            messages: [{ type: 'text', text: `[Copy สำหรับสตาฟ]\n${text}` }]
-          })
-        });
-      }
-
-      // 3. Or broadcast to all friends if enabled and the user did not receive a direct push
+      // 2. Or broadcast to all friends if enabled and the user did not receive a direct push
       const broadcastRecord = db.prepare("SELECT value FROM system_settings WHERE key = 'line_enable_broadcast'").get() as any;
       const enableBroadcast = broadcastRecord?.value === 'true';
       if (enableBroadcast && (!recipientUid || recipientUid.trim() === "")) {
@@ -499,6 +490,23 @@ app.patch("/api/queues/:id/status", (req, res) => {
   // Trigger LINE Notify (simulated + real if configured)
   if (status === 'Calling' || status === 'Completed' || status === 'Skipped') {
     triggerLineNotification(updatedQueue, status);
+    
+    // Notify the queue that is 3 spots away
+    const today = updatedQueue.appointment_date || new Date().toISOString().split('T')[0];
+    const upcomingQueues = db.prepare(`
+      SELECT id FROM queues 
+      WHERE service_id = ? AND status = 'Waiting' AND (date(created_at) = ? OR appointment_date = ?)
+      ORDER BY is_fast_track DESC, created_at ASC
+    `).all(updatedQueue.service_id, today, today) as any[];
+    
+    if (upcomingQueues.length > 2) {
+       const q3Row = upcomingQueues[2];
+       const q3Details = getQueueDetails(q3Row.id);
+       if (q3Details && q3Details.notified_approaching === 0) {
+          db.prepare('UPDATE queues SET notified_approaching = 1 WHERE id = ?').run(q3Row.id);
+          triggerLineNotification(getQueueDetails(q3Row.id), 'Approaching');
+       }
+    }
   }
 
   res.json(updatedQueue);
@@ -775,6 +783,38 @@ async function startServer() {
       console.log('Client disconnected:', socket.id);
     });
   });
+
+  // Background Process for Notifications (1 hour before queue)
+  setInterval(() => {
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Check queues that have preferred_time (HH:mm - HH:mm) or (HH:mm)
+    const upcomingQueues = db.prepare(`
+      SELECT id, preferred_time FROM queues 
+      WHERE status = 'Waiting' AND (date(created_at) = ? OR appointment_date = ?) AND notified_1hr = 0
+    `).all(today, today) as any[];
+
+    const now = new Date();
+    const currentMins = now.getHours() * 60 + now.getMinutes();
+
+    for (const q of upcomingQueues) {
+      if (!q.preferred_time || q.preferred_time.trim() === '') continue;
+
+      // Extract the first HH:mm
+      const match = q.preferred_time.match(/(\d{2}):(\d{2})/);
+      if (match) {
+        const hh = parseInt(match[1]);
+        const mm = parseInt(match[2]);
+        const preferredMins = hh * 60 + mm;
+
+        // If the preferred time is within the next 60 minutes
+        if (preferredMins > currentMins && (preferredMins - currentMins) <= 60) {
+           db.prepare('UPDATE queues SET notified_1hr = 1 WHERE id = ?').run(q.id);
+           triggerLineNotification(getQueueDetails(q.id), 'Approaching_1hr');
+        }
+      }
+    }
+  }, 60000); // Check every minute
 }
 
 startServer();
