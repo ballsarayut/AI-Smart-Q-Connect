@@ -225,13 +225,19 @@ export default function Patient() {
         if (data.campaign_end_date) setCampaignEndDate(data.campaign_end_date);
         
         if (data.line_liff_id && data.line_liff_id.trim() !== '') {
-          liff.init({ liffId: data.line_liff_id }).then(() => {
+          const isNestedIframe = window.self !== window.top;
+          liff.init({ 
+            liffId: data.line_liff_id,
+            withLoginOnExternalBrowser: !isNestedIframe 
+          }).then(() => {
             setLiffInitialized(true);
             if (liff.isLoggedIn()) {
               liff.getProfile().then(profile => {
                 setLineUid(profile.userId);
                 setLiffProfileName(profile.displayName);
               }).catch(err => console.error("LIFF get profile error", err));
+            } else if (isNestedIframe) {
+              setLiffError("ระบบไม่สามารถล็อกอินเข้า LINE อัตโนมัติได้เมื่อเปิดผ่านหน้าต่างจำลอง (AI Studio) กรุณากดปุ่ม ↗ มุมบนขวาเพื่อเปิดแอปในหน้าต่างใหม่ (หากเปิดในแพลตฟอร์มปกติจะล็อกอินเพื่อรับการแจ้งเตือนอัตโนมัติ)");
             }
           }).catch(err => {
             console.error("LIFF init error", err);
@@ -382,27 +388,19 @@ export default function Patient() {
                       </div>
                     ) : (
                       <div className="w-full flex-col gap-2">
-                        <div className="w-full border-2 border-slate-200 rounded-xl p-4 bg-slate-50 flex items-center justify-between gap-4 transition-all">
-                          <p className="text-xs text-slate-500 font-medium">เข้าสู่ระบบด้วยบัญชี LINE ของคุณเพื่อรับการแจ้งเตือนความคืบหน้าของคิวอัตโนมัติ</p>
-                          <button 
-                            type="button"
-                            onClick={() => {
-                              try {
-                                if (window.self !== window.top) {
-                                  setLiffError("ไม่สามารถเข้าสู่ระบบ LINE ในหน้าต่างจำลองนี้ได้ กรุณากดปุ่ม ↗ ตรงมุมบนขวาเพื่อเปิดในแท็บใหม่");
-                                } else {
-                                  liff.login();
-                                }
-                              } catch (e) {
-                                liff.login();
-                              }
-                            }}
-                            className="bg-[#06C755] hover:bg-[#05b34c] text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-sm whitespace-nowrap active:scale-95 transition-all flex items-center gap-2"
-                          >
-                            ล็อกอิน LINE
-                          </button>
-                        </div>
-                        {liffError && <p className="text-xs text-red-500 font-semibold mt-1 px-1 animate-in fade-in">{liffError}</p>}
+                        {liffError ? (
+                          <div className="w-full border-2 border-amber-200 rounded-xl p-4 bg-amber-50 flex flex-col gap-2 transition-all">
+                            <span className="font-bold flex items-center gap-2 text-amber-700 text-sm">
+                              <AlertCircle className="w-5 h-5" /> คำเตือนการทำงาน
+                            </span>
+                            <p className="text-xs text-amber-700 font-medium">{liffError}</p>
+                          </div>
+                        ) : (
+                          <div className="w-full border-2 border-slate-200 rounded-xl p-4 bg-slate-50 flex items-center justify-between gap-4 transition-all">
+                            <p className="text-xs text-slate-500 font-medium">กำลังเตรียมเข้าสู่ระบบ LINE อัตโนมัติ เพื่อรับการแจ้งเตือน...</p>
+                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-green-500"></div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
