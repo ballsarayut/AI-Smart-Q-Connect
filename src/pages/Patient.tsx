@@ -243,22 +243,50 @@ export default function Patient() {
       });
 
     // Listen to queue updates to update status real-time
-    socket.on('queue_updated', (updatedQueue: Queue) => {
+    const handleQueueUpdated = (updatedQueue: Queue) => {
       setMyQueue(prev => {
-        if (prev && prev.id === updatedQueue.id) {
-          return updatedQueue;
+        if (prev) {
+          // Regardless of whose queue updated, re-fetch our queue to get accurate people_in_front
+          fetch(`/api/queues/number/${prev.queue_number}`)
+            .then(res => {
+              if (res.ok) return res.json();
+              throw new Error();
+            })
+            .then(data => setMyQueue(data))
+            .catch(() => {});
+            
+          // Also update immediately if it's our queue
+          if (prev.id === updatedQueue.id) {
+            return { ...prev, ...updatedQueue, people_in_front: prev.people_in_front }; // Keep old people_in_front until fetch finishes
+          }
         }
         return prev;
       });
+    };
+    
+    socket.on('queue_updated', handleQueueUpdated);
+
+    socket.on('settings_updated', (data: any) => {
+      if (data.campaign_title) setCampaignTitle(data.campaign_title);
+      if (data.campaign_desc) setCampaignDesc(data.campaign_desc);
     });
 
     socket.on('services_updated', (updated: Service[]) => {
       setServices(updated);
     });
 
+    socket.on('slots_updated', () => {
+      // Re-fetch slots when updated
+      fetch(`/api/slots?date=${new Date().toISOString().split('T')[0]}`)
+      .then(res => res.json())
+      .then(data => setSlots(data));
+    });
+
     return () => {
-      socket.off('queue_updated');
+      socket.off('queue_updated', handleQueueUpdated);
+      socket.off('settings_updated');
       socket.off('services_updated');
+      socket.off('slots_updated');
     };
   }, []);
 

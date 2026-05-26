@@ -118,9 +118,31 @@ export default function Admin() {
       setServices(updated);
     });
 
+    socket.on('settings_updated', (data: any) => {
+        if (data.service_open_time) setOpenTime(data.service_open_time);
+        if (data.service_close_time) setCloseTime(data.service_close_time);
+        if (data.hospital_lat) setHospitalLat(data.hospital_lat);
+        if (data.hospital_lng) setHospitalLng(data.hospital_lng);
+        if (data.hospital_map_link) setMapLink(data.hospital_map_link);
+        if (data.line_channel_access_token) setLineToken(data.line_channel_access_token);
+        if (data.line_liff_id) setLineLiffId(data.line_liff_id);
+        if (data.line_admin_uid) setLineAdmin(data.line_admin_uid);
+        if (data.campaign_capacity) setCampaignCapacity(data.campaign_capacity);
+        if (data.campaign_title) setCampaignTitle(data.campaign_title);
+        if (data.campaign_desc) setCampaignDesc(data.campaign_desc);
+        if (data.campaign_start_date) setCampaignStartDate(data.campaign_start_date);
+        if (data.campaign_end_date) setCampaignEndDate(data.campaign_end_date);
+    });
+
+    socket.on('slots_updated', () => {
+      fetch('/api/admin/slots').then(res => res.json()).then(data => setSlots(data));
+    });
+
     return () => {
       socket.off('queue_updated');
       socket.off('services_updated');
+      socket.off('settings_updated');
+      socket.off('slots_updated');
     };
   }, []);
 

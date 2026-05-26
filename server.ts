@@ -3,6 +3,7 @@ import path from "path";
 import { Server } from "socket.io";
 import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
+import { GoogleGenAI } from "@google/genai";
 
 const app = express();
 const PORT = 3000;
@@ -161,11 +162,13 @@ app.get("/api/admin/slots", (req, res) => {
 app.post("/api/admin/slots", (req, res) => {
   const { start_time, end_time, capacity, service_id, days_of_week } = req.body;
   const result = db.prepare('INSERT INTO time_slots (start_time, end_time, capacity, service_id, days_of_week) VALUES (?, ?, ?, ?, ?)').run(start_time, end_time, capacity, service_id || null, days_of_week || '0,1,2,3,4,5,6');
+  app.get('io').emit('slots_updated');
   res.json({ id: result.lastInsertRowid, start_time, end_time, capacity, active: 1, service_id: service_id || null, days_of_week: days_of_week || '0,1,2,3,4,5,6' });
 });
 
 app.delete("/api/admin/slots/:id", (req, res) => {
   db.prepare('DELETE FROM time_slots WHERE id = ?').run(req.params.id);
+  app.get('io').emit('slots_updated');
   res.json({ success: true });
 });
 
@@ -173,6 +176,7 @@ app.patch("/api/admin/slots/:id", (req, res) => {
   const { start_time, end_time, capacity, active, service_id, days_of_week } = req.body;
   db.prepare('UPDATE time_slots SET start_time = ?, end_time = ?, capacity = ?, active = ?, service_id = ?, days_of_week = ? WHERE id = ?')
     .run(start_time, end_time, capacity, active === undefined ? 1 : active, service_id || null, days_of_week, req.params.id);
+  app.get('io').emit('slots_updated');
   res.json({ success: true });
 });
 
@@ -626,8 +630,7 @@ app.post("/api/settings", (req, res) => {
     if (campaign_end_date !== undefined) {
       db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('campaign_end_date', ?)").run(campaign_end_date);
     }
-    res.json({
-      success: true,
+    const settingsObj = {
       line_channel_access_token,
       line_liff_id,
       line_admin_uid,
@@ -642,6 +645,11 @@ app.post("/api/settings", (req, res) => {
       campaign_desc,
       campaign_start_date,
       campaign_end_date
+    };
+    app.get('io').emit('settings_updated', settingsObj);
+    res.json({
+      success: true,
+      ...settingsObj
     });
   } catch (err) {
     res.status(500).json({ error: "Failed to save settings" });
@@ -698,6 +706,73 @@ app.get("/api/analytics", (req, res) => {
     peakTimes,
     avgWaitTimeMins: Math.round(waitTime?.avg_wait_mins || 0)
   });
+});
+
+let geminiAiClient: GoogleGenAI | null = null;
+function getAiClient() {
+  if (!geminiAiClient) {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error("GEMINI_API_KEY is not defined");
+    }
+    geminiAiClient = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
+  }
+  return geminiAiClient;
+}
+
+app.post("/api/analytics/ai-insights", async (req, res) => {
+  try {
+    const ai = getAiClient();
+    
+    // Aggregate past configurations and stats for the prompt
+    // Just select all system settings
+    const settings = db.prepare("SELECT key, value FROM system_settings").all();
+    
+    // Historical stats across all time, not just today
+    const totalStats = db.prepare(`
+      SELECT 
+        count(*) as total_queues,
+        sum(case when status = 'Completed' then 1 else 0 end) as completed,
+        sum(case when status = 'No-show' then 1 else 0 end) as no_shows,
+        avg((julianday(called_at) - julianday(created_at)) * 24 * 60) as avg_wait_time
+      FROM queues
+      WHERE called_at IS NOT NULL
+    `).get() as any;
+
+    const dataPayload = {
+      settings,
+      stats: totalStats,
+      dailyContext: req.body // Let the frontend pass current daily stats if it wants
+    };
+
+    const prompt = `
+คุณคือผู้เชี่ยวชาญด้านระบบบริหารจัดการคิวและบริการในโรงพยาบาลส่งเสริมสุขภาพตำบล (รพ.สต.) 
+จงวิเคราะห์ข้อมูลต่อไปนี้ และให้คำแนะนำที่สามารถนำไปปฏิบัติได้จริงเพื่อปรับปรุงการบริการ ลดเวลารอคอย และเพิ่มความพึงพอใจ
+กรุณาตอบเป็นข้อๆ อย่างกระชับ เป็นภาษาไทย
+
+ข้อมูลสรุปสถิติที่ผ่านมาและการตั้งค่า:
+${JSON.stringify(dataPayload, null, 2)}
+`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+      config: {
+        systemInstruction: "You are an expert hospital administrator and data analyst helping to improve patient experience.",
+      }
+    });
+
+    res.json({ insights: response.text });
+  } catch (error: any) {
+    console.error("AI Insight Error:", error);
+    res.status(500).json({ error: error.message || "Failed to generate AI insights" });
+  }
 });
 
 function getQueueDetails(id: string) {

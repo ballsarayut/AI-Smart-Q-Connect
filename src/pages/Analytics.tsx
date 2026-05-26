@@ -1,14 +1,48 @@
 import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Users, Clock, MonitorPlay, HeartPulse, ArrowLeft } from 'lucide-react';
+import { Users, Clock, MonitorPlay, HeartPulse, ArrowLeft, BrainCircuit } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import Markdown from 'react-markdown';
+import { io } from 'socket.io-client';
+
+const socket = io();
 
 export default function Analytics() {
   const [stats, setStats] = useState<any>(null);
+  const [insights, setInsights] = useState<string | null>(null);
+  const [loadingInsights, setLoadingInsights] = useState(false);
 
   useEffect(() => {
-    fetch('/api/analytics').then(res => res.json()).then(data => setStats(data));
+    const fetchAnalytics = () => {
+      fetch('/api/analytics').then(res => res.json()).then(data => setStats(data));
+    };
+    
+    fetchAnalytics();
+    
+    socket.on('queue_updated', fetchAnalytics);
+    
+    return () => {
+      socket.off('queue_updated', fetchAnalytics);
+    };
   }, []);
+
+  const handleFetchInsights = async () => {
+    setLoadingInsights(true);
+    try {
+      const response = await fetch('/api/analytics/ai-insights', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(stats)
+      });
+      const data = await response.json();
+      setInsights(data.insights);
+    } catch (err) {
+      console.error(err);
+      setInsights("เกิดข้อผิดพลาดในการโหลด AI Insights");
+    } finally {
+      setLoadingInsights(false);
+    }
+  };
 
   if (!stats) return <div className="p-8 text-center text-slate-500">Loading Analytics...</div>;
 
@@ -139,6 +173,37 @@ export default function Analytics() {
           </div>
 
         </div>
+
+        {/* AI Insights Section */}
+        <div className="mt-8">
+          <div className="bg-white p-6 rounded-2xl border-2 border-slate-200 shadow-sm">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-2">
+                  <BrainCircuit className="w-5 h-5 text-indigo-500" />
+                  AI ประมวลผลข้อมูล (Gemini)
+                </h3>
+                <p className="text-xs text-slate-500 font-medium">ให้ AI ช่วยประเมินและให้คำแนะนำเพื่อปรับปรุงบริการของ รพ.สต.</p>
+              </div>
+              <button 
+                onClick={handleFetchInsights}
+                disabled={loadingInsights}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2.5 rounded-xl font-bold text-xs uppercase tracking-widest transition-all disabled:opacity-50 flex items-center gap-2 shrink-0"
+              >
+                {loadingInsights ? 'กำลังประมวลผล...' : 'เริ่มการวิเคราะห์ด้วย AI'}
+              </button>
+            </div>
+            
+            {insights && (
+              <div className="mt-4 p-6 bg-slate-50 rounded-xl border border-slate-200 text-sm text-slate-700">
+                <div className="prose prose-slate prose-sm max-w-none">
+                  <Markdown>{insights}</Markdown>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+        
       </div>
     </div>
   );
