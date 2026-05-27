@@ -140,6 +140,17 @@ export default function Patient() {
   const [campaignStartDate, setCampaignStartDate] = useState('');
   const [campaignEndDate, setCampaignEndDate] = useState('');
   const [appointmentDate, setAppointmentDate] = useState(new Date().toISOString().split('T')[0]);
+
+  useEffect(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const effectiveMin = campaignStartDate || today;
+    // Snap to valid range if outside
+    if (appointmentDate < effectiveMin) {
+      setAppointmentDate(effectiveMin);
+    } else if (campaignEndDate && appointmentDate > campaignEndDate) {
+      setAppointmentDate(campaignEndDate);
+    }
+  }, [campaignStartDate, campaignEndDate, appointmentDate]);
   
   const [liffInitialized, setLiffInitialized] = useState(false);
   const [liffProfileName, setLiffProfileName] = useState('');
@@ -215,15 +226,15 @@ export default function Patient() {
         if (data.hospital_lng) setHospitalLng(parseFloat(data.hospital_lng));
         if (data.hospital_map_link) setMapLink(data.hospital_map_link);
         if (data.campaign_title) setCampaignTitle(data.campaign_title);
-        if (data.campaign_desc) setCampaignDesc(data.campaign_desc);
-        if (data.campaign_start_date) {
+        if (data.campaign_desc !== undefined) setCampaignDesc(data.campaign_desc);
+        if (data.campaign_start_date !== undefined) {
           setCampaignStartDate(data.campaign_start_date);
           const startStr = data.campaign_start_date;
-          if (startStr > new Date().toISOString().split('T')[0]) {
+          if (startStr && startStr > new Date().toISOString().split('T')[0]) {
             setAppointmentDate(startStr);
           }
         }
-        if (data.campaign_end_date) setCampaignEndDate(data.campaign_end_date);
+        if (data.campaign_end_date !== undefined) setCampaignEndDate(data.campaign_end_date);
         
         if (data.line_liff_id && data.line_liff_id.trim() !== '') {
           initLiff(data.line_liff_id.trim())
@@ -267,10 +278,10 @@ export default function Patient() {
     socket.on('queue_updated', handleQueueUpdated);
 
     socket.on('settings_updated', (data: any) => {
-      if (data.campaign_title) setCampaignTitle(data.campaign_title);
-      if (data.campaign_desc) setCampaignDesc(data.campaign_desc);
-      if (data.campaign_start_date) setCampaignStartDate(data.campaign_start_date);
-      if (data.campaign_end_date) setCampaignEndDate(data.campaign_end_date);
+      if (data.campaign_title !== undefined) setCampaignTitle(data.campaign_title);
+      if (data.campaign_desc !== undefined) setCampaignDesc(data.campaign_desc);
+      if (data.campaign_start_date !== undefined) setCampaignStartDate(data.campaign_start_date);
+      if (data.campaign_end_date !== undefined) setCampaignEndDate(data.campaign_end_date);
     });
 
     socket.on('services_updated', (updated: Service[]) => {
