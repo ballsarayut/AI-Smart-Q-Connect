@@ -6,6 +6,7 @@ import { format } from 'date-fns';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import LineSimulator from '../components/LineSimulator';
+import toast from 'react-hot-toast';
 
 const socket = io();
 
@@ -147,11 +148,19 @@ export default function Admin() {
   }, []);
 
   const updateStatus = async (id: string, status: string) => {
-    await fetch(`/api/queues/${id}/status`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status })
-    });
+    try {
+      await fetch(`/api/queues/${id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status })
+      });
+      // Optionally could show toast based on status string
+      if (status === 'Calling') toast.success('เรียกคิวสำเร็จ');
+      else if (status === 'Completed') toast.success('เสร็จสิ้นคิวเรียบร้อย');
+      else if (status === 'Skipped') toast.error('ข้ามคิวนี้แล้ว');
+    } catch (error) {
+      toast.error('ไม่สามารถอัพเดทสถานะคิวได้');
+    }
   };
 
   const handleTestLine = async () => {
@@ -225,21 +234,26 @@ export default function Admin() {
 
   const submitWalkin = async (e: React.FormEvent) => {
     e.preventDefault();
-    await fetch('/api/queues', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        citizen_id: citizenId,
-        full_name: fullName,
-        service_id: serviceId,
-        booking_type: 'Walk-in',
-        role: 'patient'
-      })
-    });
-    setCitizenId('');
-    setFullName('');
-    setServiceId('');
-    setShowWalkin(false);
+    try {
+      await fetch('/api/queues', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          citizen_id: citizenId,
+          full_name: fullName,
+          service_id: serviceId,
+          booking_type: 'Walk-in',
+          role: 'patient'
+        })
+      });
+      setCitizenId('');
+      setFullName('');
+      setServiceId('');
+      setShowWalkin(false);
+      toast.success('เพิ่มคิว Walk-in สำเร็จ');
+    } catch (error) {
+      toast.error('เกิดข้อผิดพลาดในการเพิ่มคิว Walk-in');
+    }
   };
 
   const addSlot = async () => {

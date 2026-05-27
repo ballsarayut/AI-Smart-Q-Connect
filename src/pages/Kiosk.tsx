@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { User, Phone, CheckCircle2, ChevronRight, Stethoscope, ArrowLeft, Settings, Trash2, Pencil } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import toast from 'react-hot-toast';
 
 export default function Kiosk() {
   const [step, setStep] = useState(1);
@@ -39,6 +40,7 @@ export default function Kiosk() {
     setNewServiceName('');
     setNewServiceMinutes(15);
     fetchServices();
+    toast.success('เพิ่มบริการใหม่เรียบร้อยแล้ว');
   };
 
   const startEdit = (service: any) => {
@@ -55,6 +57,7 @@ export default function Kiosk() {
     });
     setEditingId(null);
     fetchServices();
+    toast.success('อัพเดทบริการเรียบร้อยแล้ว');
   };
 
   const deleteService = async (id: string) => {
@@ -62,6 +65,7 @@ export default function Kiosk() {
     await fetch(`/api/admin/services/${id}`, { method: 'DELETE' });
     fetchServices();
     setIsDeleting(false);
+    toast.success('ลบบริการเรียบร้อยแล้ว');
   };
 
   const handleRegister = async (service: any) => {
@@ -82,8 +86,9 @@ export default function Kiosk() {
       setSelectedService(service);
       setTicket(data);
       setStep(3);
+      toast.success('รับบัตรคิวสำเร็จ!');
     } catch (error) {
-      alert('เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
+      toast.error('เกิดข้อผิดพลาด กรุณาลองใหม่อีกครั้ง');
     } finally {
       setLoading(false);
     }

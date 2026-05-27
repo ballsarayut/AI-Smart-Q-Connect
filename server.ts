@@ -316,7 +316,7 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
   } else if (action === 'No-show') {
     text = `🚨 แจ้งเตือน: คุณขาดนัด${queue.service_name} (ที่รพ.สต.)\n• หมายเลขคิว: ${queue.queue_number}\n👉 ท่านไม่ได้มาแสดงตัวตามนัดหมายในวันนี้ กรุณาติดต่อสายด่วน รพ.สต. เพื่อนัดหมายใหม่ หรือรับยาป้องกันการขาดยาค่ะ`;
   } else if (action === 'Approaching') {
-    text = `⏳ ใกล้ถึงคิวของท่านแล้ว! (รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n👉 อีกประมาณ 3 คิว จะถึงคิวของท่าน กรุณาเตรียมตัวบริเวณจุดรอพักค่ะ`;
+    text = `⏳ ใกล้ถึงคิวของท่านแล้ว! (รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n👉 อีกประมาณ ${queue.people_in_front || 0} คิว (รอประมาณ ${queue.estimated_wait_time || 0} นาที) จะถึงคิวของท่าน กรุณาเตรียมตัวบริเวณจุดรอพักค่ะ`;
   } else if (action === 'Approaching_1hr') {
     text = `⏰ แจ้งเตือนล่วงหน้า 1 ชั่วโมง (รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n• เวลาที่นัดหมาย: ${queue.preferred_time}\n👉 กรุณามาถึงก่อนเวลา เพื่อเตรียมตัวคัดกรองเบื้องต้นค่ะ`;
   }

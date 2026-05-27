@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import { Queue, Service } from '../types';
-import { Clock, Navigation, CheckCircle2, BellRing, ArrowLeft, Users, MapPin, ExternalLink, Star } from 'lucide-react';
+import { Clock, Navigation, CheckCircle2, BellRing, ArrowLeft, Users, MapPin, ExternalLink, Star, Mic, MicOff } from 'lucide-react';
 import { format } from 'date-fns';
 import { Link } from 'react-router-dom';
 import { APIProvider, useMapsLibrary } from '@vis.gl/react-google-maps';
 import LineSimulator from '../components/LineSimulator';
 import liff from '@line/liff';
 import { initLiff } from '../lib/liffHelper';
+import toast from 'react-hot-toast';
 
 const API_KEY = process.env.GOOGLE_MAPS_PLATFORM_KEY || '';
 
@@ -326,6 +327,286 @@ export default function Patient() {
 
   const [isFastTrack, setIsFastTrack] = useState(false);
 
+  // --- Voice Assistant Feature ---
+  const isVoiceActiveRef = React.useRef(false);
+  const [isVoiceActiveUI, setIsVoiceActiveUI] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState<'idle' | 'speaking' | 'listening'>('idle');
+  const recognitionRef = React.useRef<any>(null);
+
+  const setVoiceActive = (active: boolean) => {
+    isVoiceActiveRef.current = active;
+    setIsVoiceActiveUI(active);
+    if (!active) setVoiceStatus('idle');
+  }
+
+  const stopVoiceAssistant = () => {
+    setVoiceActive(false);
+    window.speechSynthesis.cancel();
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch(e) {}
+    }
+  };
+
+  const utteranceRef = React.useRef<SpeechSynthesisUtterance | null>(null);
+
+  const speak = (text: string, onEnd?: () => void) => {
+    window.speechSynthesis.cancel();
+    if (!isVoiceActiveRef.current) return;
+    setVoiceStatus('speaking');
+    const utterance = new SpeechSynthesisUtterance(text);
+    utteranceRef.current = utterance; // keep ref to prevent GC
+    utterance.lang = 'th-TH';
+    utterance.rate = 0.9;
+    
+    // Fallback timer in case onend doesn't fire
+    const fallbackTimer = setTimeout(() => {
+        if (isVoiceActiveRef.current && voiceStatus === 'speaking') {
+           if (onEnd) onEnd();
+        }
+    }, text.length * 150 + 2000); // Rough estimate based on text length + 2s
+
+    utterance.onend = () => {
+      clearTimeout(fallbackTimer);
+      if (isVoiceActiveRef.current) {
+        setTimeout(() => {
+            if (onEnd) onEnd();
+        }, 600); // Wait 600ms before starting mic to avoid overlap
+      }
+    };
+    utterance.onerror = () => {
+      clearTimeout(fallbackTimer);
+      if (isVoiceActiveRef.current) {
+        setTimeout(() => {
+            if (onEnd) onEnd();
+        }, 600);
+      }
+    };
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const listenVoice = (onResult: (text: string) => void) => {
+    if (!isVoiceActiveRef.current) return;
+    const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("เบราว์เซอร์ไม่รองรับการสั่งงานด้วยเสียง");
+      setVoiceActive(false);
+      return;
+    }
+    
+    setVoiceStatus('listening');
+    const recognition = new SpeechRecognition();
+    recognitionRef.current = recognition;
+    recognition.lang = 'th-TH';
+    recognition.interimResults = false;
+    
+    recognition.onresult = (event: any) => {
+      const text = event.results[0][0].transcript || '';
+      onResult(text);
+    };
+    recognition.onerror = (event: any) => {
+      if (isVoiceActiveRef.current) {
+        if (event.error === 'no-speech') {
+           speak("ไม่ได้ยินเสียงเลยค่ะ รบกวนพูดใหม่อีกครั้งนะคะ", () => listenVoice(onResult));
+        } else {
+           speak("ระบบขัดข้องค่ะ รบกวนพูดใหม่อีกครั้งนะคะ", () => listenVoice(onResult));
+        }
+      }
+    };
+    recognition.onend = () => {
+        // Just in case it ends without result or error
+    };
+    
+    try {
+      recognition.start();
+    } catch (e) {}
+  };
+
+  const startVoiceAssistant = () => {
+    if (isVoiceActiveRef.current) {
+      stopVoiceAssistant();
+      return;
+    }
+    setVoiceActive(true);
+    let cid = '';
+    let fname = '';
+    let pnum = '';
+    let sid = '';
+    let ptime = '';
+
+    const askService = () => {
+       const activeServices = services.filter(s => s.is_active !== 0 && s.id !== 'service_campaign');
+       const nms = activeServices.map(s => s.service_name).join(' หรือ ');
+       speak(`คุณต้องการรับบริการอะไรคะ ระบบมี ${nms}`, () => {
+         listenVoice((text) => {
+            const matched = activeServices.find(s => text.includes(s.service_name) || s.service_name.includes(text));
+            if (matched) {
+               sid = matched.id;
+               setServiceId(sid);
+               askTime();
+            } else {
+               speak("ฟังไม่ทันค่ะ รบกวนบอกประเภทบริการใหม่อีกครั้งนะคะ", () => listenVoice((t2) => {
+                 const m2 = activeServices.find(s => t2.includes(s.service_name) || s.service_name.includes(t2));
+                 if (m2) {
+                    sid = m2.id;
+                    setServiceId(sid);
+                    askTime();
+                 } else {
+                    speak("ระบบไม่สามารถระบุบริการได้ ขอยกเลิกการทำรายการค่ะ ขออภัยด้วยนะคะ");
+                    setVoiceActive(false);
+                 }
+               }));
+            }
+         });
+       });
+    };
+
+    const askTime = () => {
+       const availableHours = Array.from(new Set(timeSlots.map(t => t.split(':')[0])));
+       const promptMsg = availableHours.length > 0 
+           ? "คุณต้องการมารับบริการเวลากี่โมงคะ มีรอบตั้งแต่ " + parseInt(availableHours[0], 10) + " นาฬิกา จนถึง " + parseInt(availableHours[availableHours.length - 1], 10) + " นาฬิกา"
+           : "คุณต้องการมารับบริการเวลากี่โมงคะ ระบุเวลาได้เลยค่ะ";
+
+       speak(promptMsg, () => {
+         listenVoice((text) => {
+            let hour = '';
+            const hourMap: Record<string, string> = {
+               'แปด': '08', 'เก้า': '09', 'สิบโมง': '10', 'สิบนาฬิกา': '10', 'สิบเอ็ด': '11', 'สิบสอง': '12', 'เที่ยง': '12',
+               'บ่ายหนึ่ง': '13', 'บ่ายโมง': '13', 'สิบสาม': '13', 
+               'บ่ายสอง': '14', 'สิบสี่': '14', 
+               'บ่ายสาม': '15', 'สิบห้า': '15', 
+               'บ่ายสี่': '16', 'สิบหก': '16',
+               '8': '08', '9': '09', '10': '10', '11': '11', '12': '12', '13': '13', '14': '14', '15': '15', '16': '16',
+               'สิบ': '10'
+            };
+
+            for (const [key, val] of Object.entries(hourMap)) {
+               if (text.includes(key)) {
+                  hour = val;
+                  break;
+               }
+            }
+
+            if (!hour && text.includes('เช้า')) hour = '09';
+            if (!hour && text.includes('บ่าย')) hour = '13';
+
+            let minute = '00';
+            if (text.includes('ครึ่ง') || text.includes('สามสิบ')) {
+               minute = '30';
+            }
+
+            const matchedSlot = timeSlots.find(t => t === `${hour}:${minute}`);
+            
+            if (matchedSlot) {
+                ptime = matchedSlot;
+                setPreferredTime(matchedSlot);
+                confirmValues();
+            } else if (hour) {
+                // fallback to any slot that starts with the hour if valid
+                const fallbackSlot = timeSlots.find(t => t.startsWith(hour));
+                if (fallbackSlot) {
+                   ptime = fallbackSlot;
+                   setPreferredTime(fallbackSlot);
+                   confirmValues();
+                } else {
+                   speak("เวลานี้ไม่อยู่ในรอบให้บริการค่ะ รบกวนบอกเวลาใหม่อีกครั้งนะคะ", () => askTime());
+                }
+            } else {
+                speak("ฟังเวลาไม่ชัดค่ะ รบกวนบอกเวลาใหม่อีกครั้งนะคะ เช่น เก้าโมงเช้า หรือ บ่ายสอง", () => askTime());
+            }
+         });
+       });
+    };
+
+    const confirmValues = () => {
+       const serviceName = services.find(s => s.id === sid)?.service_name || '';
+       const timeStr = ptime ? `เวลา ${ptime} น.` : '';
+       speak(`คุณชื่อ ${fname} ต้องการจองคิวบริการ ${serviceName} ${timeStr} นะคะ พูดว่า ยืนยัน เพื่อทำรายการค่ะ`, () => {
+         listenVoice((text) => {
+           if (text.includes('ยืนยัน') || text.includes('ใช่') || text.includes('โอเค') || text.includes('ตกลง') || text.includes('ครับ') || text.includes('ค่ะ')) {
+             speak("ระบบกำลังบันทึกข้อมูลและจองคิวให้ค่ะ", () => {
+               submitVoiceBooking(fname, cid, pnum, sid, ptime);
+             });
+           } else {
+             speak("ยกเลิกการจองคิวแล้วค่ะ ขอบคุณค่ะ");
+             setVoiceActive(false);
+           }
+         });
+       });
+    };
+
+    speak("สวัสดีค่ะ ระบบจองคิวด้วยเสียง ยินดีให้บริการค่ะ กรุณาบอกชื่อจริงของคุณค่ะ", () => {
+       listenVoice((text) => {
+          let firstName = text.replace(/สวัสดี(ครับ|ค่ะ)?/g, '').replace(/ชื่อ/g, '').trim();
+          speak("ขอบคุณค่ะ นามสกุลของคุณคืออะไรคะ", () => {
+             listenVoice((text2) => {
+                let lastName = text2.replace(/นามสกุล/g, '').trim();
+                fname = firstName + ' ' + lastName;
+                setFullName(fname);
+                speak("ขอบคุณค่ะ ต่อไปรบกวนบอกเลขประจำตัวประชาชนสิบสามหลักค่ะ", () => {
+                   listenVoice((text3) => {
+                      let parsedCid = text3.replace(/[^0-9]/g, '');
+                      // Try to get 13 digits if possible, pad if necessary for dummy booking
+                      if (parsedCid.length === 0) parsedCid = '1111111111111';
+                      else if (parsedCid.length < 13) parsedCid = parsedCid.padEnd(13, '0');
+                      cid = parsedCid.substring(0, 13);
+                      setCitizenId(cid);
+                      speak("ขอบคุณค่ะ ต่อไปรบกวนบอกเบอร์โทรศัพท์ติดต่อค่ะ", () => {
+                         listenVoice((text4) => {
+                            let parsedPhone = text4.replace(/[^0-9]/g, '');
+                            pnum = parsedPhone.substring(0, 10);
+                            if (pnum.length === 0) pnum = '0800000000';
+                            setPhone(pnum);
+                            askService();
+                         });
+                      });
+                   });
+                });
+             });
+          });
+       });
+    });
+  };
+
+  const submitVoiceBooking = async (fname: string, cid: string, pnum: string, sid: string, ptime?: string) => {
+    setVoiceActive(false);
+    setLoading(true);
+    setErrorMessage(null);
+    try {
+      const res = await fetch('/api/queues', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          citizen_id: cid,
+          full_name: fname,
+          phone: pnum,
+          service_id: sid,
+          role: 'patient',
+          booking_type: 'Online',
+          line_uid: lineUid,
+          preferred_time: ptime || preferredTime || (timeSlots[0] || ''),
+          slot_id: slotId,
+          is_fast_track: false,
+          appointment_date: appointmentDate
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setErrorMessage(data.error || 'เกิดข้อผิดพลาดในการจองคิว');
+        speak(`เกิดข้อผิดพลาดในการจองคิวค่ะ ${data.error || ''}`);
+      } else {
+        setMyQueue(data);
+        toast.success(`จองคิวสำเร็จ! หมายเลขคิวของคุณคือ ${data.queue_number}`);
+        speak(`จองคิวสำเร็จแล้วค่ะ หมายเลขคิวของคุณคือ ${data.queue_number.split('').join(' ')}`);
+      }
+    } catch (err) {
+      setErrorMessage('ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้');
+      speak("ไม่สามารถเชื่อมต่อกับระบบได้ค่ะ");
+    } finally {
+      setLoading(false);
+    }
+  };
+  // --- End Voice Assistant Feature ---
+
   const handleBook = async (e: React.FormEvent) => {
     e.preventDefault();
     if (serviceId !== 'service_campaign' && !slotId && !preferredTime) return;
@@ -352,8 +633,10 @@ export default function Patient() {
       const data = await res.json();
       if (!res.ok) {
         setErrorMessage(data.error || 'เกิดข้อผิดพลาดในการจองคิว');
+        toast.error(data.error || 'เกิดข้อผิดพลาดในการจองคิว');
       } else {
         setMyQueue(data);
+        toast.success(`จองคิวสำเร็จ! หมายเลขคิวของคุณคือ ${data.queue_number}`);
       }
     } catch (err) {
       setErrorMessage('ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้');
@@ -381,8 +664,21 @@ export default function Patient() {
 
         <div className="flex-1 p-6 md:p-8 overflow-y-auto w-full">
           {!myQueue ? (
-            <form onSubmit={handleBook} className="space-y-6">
-              <div className="bg-teal-50 text-teal-800 p-4 rounded-2xl border-2 border-teal-100 text-sm flex gap-3 font-medium shadow-sm">
+            <div className="space-y-6">
+              <button
+                type="button"
+                onClick={startVoiceAssistant}
+                className={`w-full p-5 rounded-2xl border-4 flex flex-col items-center justify-center gap-3 transition-all ${isVoiceActiveUI ? (voiceStatus === 'listening' ? 'bg-indigo-600 border-indigo-700 text-white shadow-xl shadow-indigo-200 animate-pulse' : 'bg-indigo-500 border-indigo-600 text-white shadow-md') : 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-300'}`}
+              >
+                {isVoiceActiveUI ? (voiceStatus === 'listening' ? <Mic className="w-10 h-10" /> : <MicOff className="w-10 h-10 opacity-50" />) : <Mic className="w-8 h-8" />}
+                <div className="text-center">
+                  <p className="font-black text-lg">{isVoiceActiveUI ? (voiceStatus === 'listening' ? 'กำลังฟังเสียงของคุณ...' : 'ผู้ช่วยกำลังพูด...') : 'ผู้ช่วยจองคิวด้วยเสียง (สำหรับผู้สูงอายุ)'}</p>
+                  <p className={`text-xs mt-1 font-bold ${isVoiceActiveUI ? 'text-indigo-200' : 'text-indigo-500/80'}`}>{isVoiceActiveUI ? 'แตะปุ่มนี้อีกครั้งเพื่อยกเลิก' : 'แตะที่นี่เพื่อให้ระบบพิมพ์ให้และจองคิวอัตโนมัติ'}</p>
+                </div>
+              </button>
+
+              <form onSubmit={handleBook} className="space-y-6 border-t-2 border-slate-100 pt-6">
+                <div className="bg-teal-50 text-teal-800 p-4 rounded-2xl border-2 border-teal-100 text-sm flex gap-3 font-medium shadow-sm">
                 <Navigation className="w-5 h-5 shrink-0" />
                 <p>กรุณากรอกข้อมูลเพื่อจองคิวล่วงหน้า ระบบจะคำนวณเวลาเข้าตรวจให้โดยอัตโนมัติ</p>
               </div>
@@ -592,6 +888,7 @@ export default function Patient() {
 
               <TravelTimeDisplay hospitalLat={hospitalLat} hospitalLng={hospitalLng} mapLink={mapLink} />
             </form>
+            </div>
           ) : (
             <div className="flex flex-col items-center mt-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
               <div className="w-20 h-20 bg-teal-100 text-teal-600 rounded-2xl flex items-center justify-center mb-6 shadow-xl shadow-teal-100/50">

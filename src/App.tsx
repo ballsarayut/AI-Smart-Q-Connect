@@ -7,6 +7,7 @@ import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
 import { useEffect, useState, useRef } from 'react';
 import liff from '@line/liff';
 import { CheckCircle2 } from 'lucide-react';
+import { Toaster } from 'react-hot-toast';
 import Home from './pages/Home';
 import Patient from './pages/Patient';
 import Admin from './pages/Admin';
@@ -176,6 +177,7 @@ export default function App() {
   return (
     <Router>
       <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
+        <Toaster position="top-center" />
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/staff-login" element={<StaffLogin />} />
