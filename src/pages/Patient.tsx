@@ -130,6 +130,7 @@ export default function Patient() {
   const [loading, setLoading] = useState(false);
   const [ratingScore, setRatingScore] = useState(0);
   const [hoverRating, setHoverRating] = useState(0);
+  const [reviewComment, setReviewComment] = useState('');
   const [submittingRating, setSubmittingRating] = useState(false);
 
   const handleRate = async (score: number) => {
@@ -139,7 +140,7 @@ export default function Patient() {
       const res = await fetch(`/api/queues/${myQueue.id}/rate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ score })
+        body: JSON.stringify({ score, comment: reviewComment })
       });
       if (res.ok) {
         const updated = await res.json();
@@ -666,14 +667,14 @@ export default function Patient() {
                   {!myQueue.satisfaction_score ? (
                     <>
                       <p className="text-sm font-bold text-slate-800 mb-3 uppercase tracking-wider">🌟 ประเมินความพึงพอใจ</p>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 mb-4">
                         {[1, 2, 3, 4, 5].map(star => (
                           <button
                             key={star}
                             disabled={submittingRating}
                             onMouseEnter={() => setHoverRating(star)}
                             onMouseLeave={() => setHoverRating(0)}
-                            onClick={() => handleRate(star)}
+                            onClick={() => setRatingScore(star)}
                             className="transition-transform hover:scale-110 focus:outline-none"
                           >
                             <Star 
@@ -682,7 +683,28 @@ export default function Patient() {
                           </button>
                         ))}
                       </div>
-                      <p className="text-xs text-slate-400 font-medium mt-3">แตะที่ดาวเพื่อให้คะแนนการบริการของเรา</p>
+                      
+                      {ratingScore > 0 && (
+                        <div className="w-full max-w-sm flex flex-col items-center gap-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                          <textarea
+                            value={reviewComment}
+                            onChange={(e) => setReviewComment(e.target.value)}
+                            placeholder="พิมพ์ข้อเสนอแนะเพิ่มเติมเพื่อการปรับปรุงการรักษา (ไม่บังคับ)..."
+                            rows={3}
+                            className="w-full px-4 py-3 bg-slate-50/50 border-2 border-slate-100 rounded-2xl text-xs font-bold outline-none focus:bg-white focus:border-teal-500 transition-all placeholder:text-slate-400/80 resize-none shadow-inner"
+                            maxLength={200}
+                          />
+                          <button
+                            disabled={submittingRating}
+                            onClick={() => handleRate(ratingScore)}
+                            className="w-full bg-teal-600 hover:bg-teal-700 text-white font-black py-3.5 px-6 rounded-2xl text-xs tracking-wider uppercase transition-all disabled:opacity-50 flex items-center justify-center gap-2 active:scale-95 shadow-lg shadow-teal-600/10"
+                          >
+                            {submittingRating ? 'กำลังส่งแบบประเมิน...' : 'ส่งแบบประเมิน การรักษา'}
+                          </button>
+                        </div>
+                      )}
+                      
+                      {ratingScore === 0 && <p className="text-xs text-slate-400 font-medium mt-1">แตะที่ดาวเพื่อให้คะแนนการบริการของเรา</p>}
                     </>
                   ) : (
                     <div className="text-center">

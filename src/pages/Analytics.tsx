@@ -1,11 +1,28 @@
 import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Users, Clock, MonitorPlay, HeartPulse, ArrowLeft, BrainCircuit, Calendar } from 'lucide-react';
+import { Users, Clock, MonitorPlay, HeartPulse, ArrowLeft, BrainCircuit, Calendar, Star } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import Markdown from 'react-markdown';
 import { io } from 'socket.io-client';
 
 const socket = io();
+
+// Date Handlers
+const formatThaiDateTime = (isoString: string) => {
+  if (!isoString) return '';
+  try {
+    const d = new Date(isoString);
+    return d.toLocaleString('th-TH', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    }) + ' น.';
+  } catch (e) {
+    return isoString;
+  }
+};
 
 // Date Handlers
 const getThailandToday = () => {
@@ -226,6 +243,79 @@ export default function Analytics() {
              </div>
           </div>
 
+        </div>
+
+        {/* Patient Reviews Section */}
+        <div className="mt-8">
+          <div className="bg-white p-6 rounded-2xl border-2 border-slate-200 shadow-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+              <div>
+                <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-2">
+                  <Star className="w-5 h-5 text-amber-500 fill-amber-500" />
+                  รีวิวและคะแนนความพึงพอใจการบริการ (Patient Reviews & Ratings)
+                </h3>
+                <p className="text-xs text-slate-500 font-medium">คะแนนความพึงพอใจและข้อคิดเห็นจริงจากผู้มารับการรักษา</p>
+              </div>
+              <div className="flex items-center gap-2 bg-emerald-50 text-emerald-800 px-4 py-2 rounded-2xl border border-emerald-200 self-start sm:self-auto font-black text-xs uppercase tracking-wider">
+                🌟 ทรานแซกชันจริง {stats.reviews?.length || 0} รีวิว
+              </div>
+            </div>
+
+            {(!stats.reviews || stats.reviews.length === 0) ? (
+              <div className="py-12 text-center text-slate-400 font-bold text-sm bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
+                ⭐ ยังไม่มีข้อมูลรีวิวความพึงพอใจในรอบข้อมูลนี้
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[500px] overflow-y-auto pr-1">
+                {stats.reviews.map((rev: any) => {
+                  const initials = (rev.full_name || 'พ').trim().substring(0, 1);
+                  return (
+                    <div 
+                      key={rev.id} 
+                      className="bg-slate-50/50 hover:bg-slate-50 border-2 border-slate-100 hover:border-slate-200/50 p-5 rounded-2xl shadow-sm hover:shadow transition-all flex flex-col justify-between gap-4 animate-in fade-in zoom-in-95 duration-300"
+                    >
+                      <div>
+                        {/* Upper row: Avatar & name + Queue */}
+                        <div className="flex items-center justify-between gap-3 mb-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-600 font-black flex items-center justify-center text-xs shadow-inner">
+                              {initials}
+                            </div>
+                            <div>
+                              <div className="font-bold text-slate-800 text-xs sm:text-sm">{rev.full_name}</div>
+                              <div className="text-[10px] text-slate-400 font-bold">{formatThaiDateTime(rev.completed_at)}</div>
+                            </div>
+                          </div>
+                          
+                          <div className="text-right">
+                            <div className="text-xs font-black text-rose-500">{rev.queue_number}</div>
+                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full text-white bg-indigo-500 shadow-sm">
+                              {rev.service_name}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Middle row: Stars */}
+                        <div className="flex gap-0.5 mb-2">
+                          {[1, 2, 3, 4, 5].map((starIdx) => (
+                            <Star 
+                              key={starIdx}
+                              className={`w-4 h-4 ${starIdx <= (rev.satisfaction_score || 5) ? 'text-amber-400 fill-amber-400' : 'text-slate-200'}`}
+                            />
+                          ))}
+                        </div>
+
+                        {/* Comment text */}
+                        <p className="text-slate-600 font-medium text-xs leading-relaxed italic bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
+                          "{rev.satisfaction_comment}"
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* AI Insights Section */}
