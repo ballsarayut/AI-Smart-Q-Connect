@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import { Queue, Service } from '../types';
-import { Clock, Navigation, CheckCircle2, BellRing, ArrowLeft, Users, MapPin, ExternalLink } from 'lucide-react';
+import { Clock, Navigation, CheckCircle2, BellRing, ArrowLeft, Users, MapPin, ExternalLink, Star } from 'lucide-react';
 import { format } from 'date-fns';
 import { Link } from 'react-router-dom';
 import { APIProvider, useMapsLibrary } from '@vis.gl/react-google-maps';
@@ -128,6 +128,26 @@ export default function Patient() {
   const [services, setServices] = useState<Service[]>([]);
   const [myQueue, setMyQueue] = useState<Queue | null>(null);
   const [loading, setLoading] = useState(false);
+  const [ratingScore, setRatingScore] = useState(0);
+  const [hoverRating, setHoverRating] = useState(0);
+  const [submittingRating, setSubmittingRating] = useState(false);
+
+  const handleRate = async (score: number) => {
+    if (!myQueue) return;
+    setSubmittingRating(true);
+    try {
+      const res = await fetch(`/api/queues/${myQueue.id}/rate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ score })
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setMyQueue(updated);
+      }
+    } catch(err) {}
+    setSubmittingRating(false);
+  };
 
   // Active operating hours from settings
   const [openTime, setOpenTime] = useState('08:30');
@@ -139,10 +159,10 @@ export default function Patient() {
   const [campaignDesc, setCampaignDesc] = useState('เพื่อความสะดวกรวดเร็วและลดความแออัด ท่านสามารถจองคิวเข้ารับบริการล่วงหน้าได้สูงสุด 10 วัน โปรดเลือกวันและรอบเวลาที่คุณสะดวก');
   const [campaignStartDate, setCampaignStartDate] = useState('');
   const [campaignEndDate, setCampaignEndDate] = useState('');
-  const [appointmentDate, setAppointmentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [appointmentDate, setAppointmentDate] = useState(new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().split('T')[0]);
 
   useEffect(() => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().split('T')[0];
     const effectiveMin = campaignStartDate || today;
     // Snap to valid range if outside
     if (appointmentDate < effectiveMin) {
@@ -230,7 +250,7 @@ export default function Patient() {
         if (data.campaign_start_date !== undefined) {
           setCampaignStartDate(data.campaign_start_date);
           const startStr = data.campaign_start_date;
-          if (startStr && startStr > new Date().toISOString().split('T')[0]) {
+          if (startStr && startStr > new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().split('T')[0]) {
             setAppointmentDate(startStr);
           }
         }
@@ -290,7 +310,7 @@ export default function Patient() {
 
     socket.on('slots_updated', () => {
       // Re-fetch slots when updated
-      fetch(`/api/slots?date=${new Date().toISOString().split('T')[0]}`)
+      fetch(`/api/slots?date=${new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().split('T')[0]}`)
       .then(res => res.json())
       .then(data => setSlots(data));
     });
@@ -518,7 +538,7 @@ export default function Patient() {
                       type="date"
                       value={appointmentDate}
                       onChange={e => setAppointmentDate(e.target.value)}
-                      min={campaignStartDate || new Date().toISOString().split('T')[0]}
+                      min={campaignStartDate || new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().split('T')[0]}
                       max={campaignEndDate || undefined}
                       className="w-full border-2 border-slate-200 rounded-xl p-3 outline-none focus:border-teal-500 bg-white transition-all font-medium text-sm"
                       required
@@ -642,9 +662,42 @@ export default function Patient() {
               </div>
               
               {myQueue.status === 'Completed' && (
-                <button onClick={() => setMyQueue(null)} className="mt-8 text-teal-600 font-bold text-sm flex items-center gap-1 uppercase tracking-wider">
-                  <ArrowLeft className="w-4 h-4"/> กลับหน้าแรก
-                </button>
+                <div className="mt-8 pt-6 border-t-[3px] border-dashed border-slate-200 flex flex-col items-center">
+                  {!myQueue.satisfaction_score ? (
+                    <>
+                      <p className="text-sm font-bold text-slate-800 mb-3 uppercase tracking-wider">🌟 ประเมินความพึงพอใจ</p>
+                      <div className="flex gap-2">
+                        {[1, 2, 3, 4, 5].map(star => (
+                          <button
+                            key={star}
+                            disabled={submittingRating}
+                            onMouseEnter={() => setHoverRating(star)}
+                            onMouseLeave={() => setHoverRating(0)}
+                            onClick={() => handleRate(star)}
+                            className="transition-transform hover:scale-110 focus:outline-none"
+                          >
+                            <Star 
+                              className={`w-10 h-10 ${star <= (hoverRating || ratingScore) ? 'text-amber-400 fill-amber-400' : 'text-slate-200'} transition-colors`} 
+                            />
+                          </button>
+                        ))}
+                      </div>
+                      <p className="text-xs text-slate-400 font-medium mt-3">แตะที่ดาวเพื่อให้คะแนนการบริการของเรา</p>
+                    </>
+                  ) : (
+                    <div className="text-center">
+                      <div className="inline-flex items-center justify-center p-3 bg-amber-50 text-amber-500 rounded-full mb-2">
+                        <CheckCircle2 className="w-8 h-8" />
+                      </div>
+                      <p className="text-sm rounded-xl font-bold text-slate-800">ขอบคุณสำหรับคำโหวตของคุณ!</p>
+                      <p className="text-xs text-slate-500 mt-1">เราจะนำไปปรับปรุงการให้บริการในครั้งต่อไป</p>
+                    </div>
+                  )}
+                  
+                  <button onClick={() => setMyQueue(null)} className="mt-8 text-teal-600 font-bold text-sm flex items-center gap-1 uppercase tracking-wider">
+                    <ArrowLeft className="w-4 h-4"/> กลับหน้าแรก
+                  </button>
+                </div>
               )}
             </div>
           )}

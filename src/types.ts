@@ -30,4 +30,5 @@ export interface Queue {
   estimated_minutes: number;
   preferred_time?: string;
   appointment_date?: string;
+  satisfaction_score?: number;
 }

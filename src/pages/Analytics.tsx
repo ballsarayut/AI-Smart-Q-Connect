@@ -1,20 +1,48 @@
 import { useState, useEffect } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { Users, Clock, MonitorPlay, HeartPulse, ArrowLeft, BrainCircuit } from 'lucide-react';
+import { Users, Clock, MonitorPlay, HeartPulse, ArrowLeft, BrainCircuit, Calendar } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import Markdown from 'react-markdown';
 import { io } from 'socket.io-client';
 
 const socket = io();
 
+// Date Handlers
+const getThailandToday = () => {
+  const d = new Date();
+  d.setUTCHours(d.getUTCHours() + 7);
+  return d.toISOString().split('T')[0];
+}
+const getStartOfWeek = () => {
+  const today = getThailandToday();
+  const d = new Date(today); // UTC midnight
+  const day = d.getUTCDay();
+  const diff = d.getUTCDate() - day + (day === 0 ? -6 : 1);
+  d.setUTCDate(diff);
+  return d.toISOString().split('T')[0];
+}
+const getStartOfMonth = () => {
+  const today = getThailandToday();
+  return `${today.substring(0, 8)}01`;
+}
+const getStartOfYear = () => {
+  const today = getThailandToday();
+  return `${today.substring(0, 5)}01-01`;
+}
+
 export default function Analytics() {
   const [stats, setStats] = useState<any>(null);
   const [insights, setInsights] = useState<string | null>(null);
   const [loadingInsights, setLoadingInsights] = useState(false);
+  
+  const [startDate, setStartDate] = useState(getThailandToday());
+  const [endDate, setEndDate] = useState(getThailandToday());
 
   useEffect(() => {
     const fetchAnalytics = () => {
-      fetch('/api/analytics').then(res => res.json()).then(data => setStats(data));
+      fetch(`/api/analytics?start=${startDate}&end=${endDate}`)
+        .then(res => res.json())
+        .then(data => setStats(data));
     };
     
     fetchAnalytics();
@@ -24,7 +52,7 @@ export default function Analytics() {
     return () => {
       socket.off('queue_updated', fetchAnalytics);
     };
-  }, []);
+  }, [startDate, endDate]);
 
   const handleFetchInsights = async () => {
     setLoadingInsights(true);
@@ -56,13 +84,39 @@ export default function Analytics() {
   return (
     <div className="min-h-screen bg-slate-50 p-6 md:p-8 font-sans">
       <div className="max-w-7xl mx-auto">
-        <div className="mb-8 flex items-start gap-4">
-          <Link to="/staff" className="mt-1 w-10 h-10 bg-white border-2 border-slate-200 rounded-lg flex items-center justify-center text-slate-600 hover:bg-slate-50 transition-colors shadow-sm shrink-0">
-            <ArrowLeft className="w-5 h-5" />
-          </Link>
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">รายงานสรุปข้อมูล (สำหรับผู้อำนวยการ)</h1>
-            <p className="text-sm text-slate-500 font-medium">สำหรับผู้อำนวยการ รพ.สต. และประเมินผลการให้บริการ</p>
+        <div className="mb-8 flex flex-col md:flex-row md:items-start justify-between gap-4">
+          <div className="flex items-start gap-4">
+            <Link to="/staff" className="mt-1 w-10 h-10 bg-white border-2 border-slate-200 rounded-lg flex items-center justify-center text-slate-600 hover:bg-slate-50 transition-colors shadow-sm shrink-0">
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
+            <div>
+              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">รายงานสรุปข้อมูล (สำหรับผู้อำนวยการ)</h1>
+              <p className="text-sm text-slate-500 font-medium">สำหรับผู้อำนวยการ รพ.สต. และประเมินผลการให้บริการ</p>
+            </div>
+          </div>
+          
+          <div className="bg-white p-3 rounded-xl border-2 border-slate-200 shadow-sm flex flex-col sm:flex-row gap-3">
+            <div className="flex bg-slate-100 p-1 rounded-lg">
+              <button onClick={() => {setStartDate(getThailandToday()); setEndDate(getThailandToday());}} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${startDate === getThailandToday() && endDate === getThailandToday() ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                วันนี้
+              </button>
+              <button onClick={() => {setStartDate(getStartOfWeek()); setEndDate(getThailandToday());}} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${startDate === getStartOfWeek() && endDate === getThailandToday() ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                สัปดาห์นี้
+              </button>
+              <button onClick={() => {setStartDate(getStartOfMonth()); setEndDate(getThailandToday());}} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${startDate === getStartOfMonth() && endDate === getThailandToday() ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                เดือนนี้
+              </button>
+              <button onClick={() => {setStartDate(getStartOfYear()); setEndDate(getThailandToday());}} className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${startDate === getStartOfYear() && endDate === getThailandToday() ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                ปีนี้
+              </button>
+            </div>
+            <div className="flex items-center gap-2 px-2">
+              <div className="flex items-center gap-2">
+                <input type="date" value={startDate} onChange={e => {if (e.target.value) setStartDate(e.target.value)}} className="text-xs font-medium border border-slate-300 rounded px-2 py-1 outline-none text-slate-700 bg-white" />
+                <span className="text-slate-400 text-xs">-</span>
+                <input type="date" value={endDate} onChange={e => {if (e.target.value) setEndDate(e.target.value)}} className="text-xs font-medium border border-slate-300 rounded px-2 py-1 outline-none text-slate-700 bg-white" />
+              </div>
+            </div>
           </div>
         </div>
 
@@ -96,7 +150,7 @@ export default function Analytics() {
                <div className="p-3 bg-rose-50 text-rose-600 rounded-xl"><HeartPulse className="w-6 h-6"/></div>
                <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">ความพึงพอใจประเมิน</p>
              </div>
-             <p className="text-4xl font-black text-slate-900">92<span className="text-lg font-medium text-slate-400">%</span></p>
+             <p className="text-4xl font-black text-slate-900">{stats?.satisfactionPercentage || 0}<span className="text-lg font-medium text-slate-400">%</span></p>
           </div>
         </div>
 

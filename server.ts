@@ -5,6 +5,12 @@ import Database from "better-sqlite3";
 import { randomUUID } from "crypto";
 import { GoogleGenAI } from "@google/genai";
 
+function getThailandTimeStr() {
+  const d = new Date();
+  d.setUTCHours(d.getUTCHours() + 7);
+  return d.toISOString().replace('Z', '');
+}
+
 const app = express();
 const PORT = 3000;
 
@@ -48,7 +54,8 @@ db.exec(`
     is_campaign INTEGER DEFAULT 0,
     appointment_date TEXT,
     notified_approaching INTEGER DEFAULT 0,
-    notified_1hr INTEGER DEFAULT 0
+    notified_1hr INTEGER DEFAULT 0,
+    satisfaction_score INTEGER
   );
 
   CREATE TABLE IF NOT EXISTS time_slots (
@@ -63,6 +70,7 @@ db.exec(`
 `);
 
 try { db.prepare("ALTER TABLE queues ADD COLUMN appointment_date TEXT").run(); } catch (e) {}
+try { db.prepare("ALTER TABLE queues ADD COLUMN satisfaction_score INTEGER").run(); } catch (e) {}
 try { db.prepare("ALTER TABLE time_slots ADD COLUMN service_id TEXT").run(); } catch (e) {}
 try { db.prepare("ALTER TABLE time_slots ADD COLUMN days_of_week TEXT DEFAULT '1,2,3,4,5'").run(); } catch (e) {}
 
@@ -221,7 +229,7 @@ function generateQueueNumber(serviceId: string, isFastTrack: boolean = false) {
   }
   
   // Count today's queues for this service
-  const today = new Date().toISOString().split('T')[0];
+  const today = getThailandTimeStr().split('T')[0];
   const countStmt = db.prepare(`SELECT count(*) as count FROM queues WHERE service_id = ? AND date(created_at) = ?`);
   const { count } = countStmt.get(serviceId, today) as { count: number };
   
@@ -239,6 +247,7 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
 
   let text = "";
   const timeStr = new Date(queue.created_at).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+  let lineMessages: any[] = [];
   
   if (action === 'Booked') {
     text = `📌 จองคิวสำเร็จ! (รพ.สต.อัจฉริยะ)
@@ -260,7 +269,47 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
   } else if (action === 'Calling') {
     text = `📣 ประกาศเรียกคิวเลขนมัสการ! (รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n• ชื่อคนไข้: ${queue.full_name}\n👉 กรุณาเข้าพบเจ้าหน้าที่ ณ จุดคัดกรองหรือห้องตรวจทันทีค่ะ`;
   } else if (action === 'Completed') {
-    text = `✅ บริการเสร็จสิ้นเรียบร้อย (รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n👉 รพ.สต. ขอขอบพระคุณที่เข้ารับบริการ ขอให้ท่านมีสุขภาพแข็งแรง ปราศจากโรคภัยค่ะ`;
+    const liffRecord = db.prepare("SELECT value FROM system_settings WHERE key = 'line_liff_id'").get() as any;
+    const liffId = liffRecord?.value;
+    text = `✅ บริการเสร็จสิ้นเรียบร้อย (รพ.สต.อัจฉริยะ)
+• หมายเลขคิว: ${queue.queue_number}
+• บริการ: ${queue.service_name}
+👉 รพ.สต. ขอขอบพระคุณที่เข้ารับบริการ ขอให้ท่านมีสุขภาพแข็งแรง ปราศจากโรคภัยค่ะ
+
+🌟 โปรดประเมินความพึงพอใจการให้บริการด้านล่างนี้ค่ะ 👇`;
+    
+    if (liffId) {
+      lineMessages = [
+        {
+          type: 'text',
+          text,
+          quickReply: {
+            items: [
+              {
+                type: 'action',
+                action: { type: 'uri', label: '⭐⭐⭐⭐⭐', uri: `https://liff.line.me/${liffId}?rate=5&qid=${queue.id}` }
+              },
+              {
+                type: 'action',
+                action: { type: 'uri', label: '⭐⭐⭐⭐', uri: `https://liff.line.me/${liffId}?rate=4&qid=${queue.id}` }
+              },
+              {
+                type: 'action',
+                action: { type: 'uri', label: '⭐⭐⭐', uri: `https://liff.line.me/${liffId}?rate=3&qid=${queue.id}` }
+              },
+              {
+                type: 'action',
+                action: { type: 'uri', label: '⭐⭐', uri: `https://liff.line.me/${liffId}?rate=2&qid=${queue.id}` }
+              },
+              {
+                type: 'action',
+                action: { type: 'uri', label: '⭐', uri: `https://liff.line.me/${liffId}?rate=1&qid=${queue.id}` }
+              }
+            ]
+          }
+        }
+      ];
+    }
   } else if (action === 'Skipped') {
     text = `⚠️ แจ้งเตือนการข้ามคิว (รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n👉 เนื่องจากพยาบาลเรียกคิวแล้วไม่พบท่าน คิวจึงถูกข้ามชั่วคราว กรุณาติดต่อเคาน์เตอร์พยาบาลค่ะ`;
   } else if (action === 'No-show') {
@@ -271,9 +320,13 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
     text = `⏰ แจ้งเตือนล่วงหน้า 1 ชั่วโมง (รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n• เวลาที่นัดหมาย: ${queue.preferred_time}\n👉 กรุณามาถึงก่อนเวลา เพื่อเตรียมตัวคัดกรองเบื้องต้นค่ะ`;
   }
 
+  if (lineMessages.length === 0) {
+    lineMessages = [{ type: 'text', text }];
+  }
+
   // Save notification log in SQLite for UI Real-time Simulation Feed
   const logId = randomUUID();
-  const now = new Date().toISOString();
+  const now = getThailandTimeStr();
   try {
     db.prepare(`
       INSERT INTO line_logs (id, queue_id, queue_number, message, created_at)
@@ -317,7 +370,7 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
           headers,
           body: JSON.stringify({
             to: recipientUid,
-            messages: [{ type: 'text', text }]
+            messages: lineMessages
           })
         });
         const resData = await response.json();
@@ -333,7 +386,7 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
           method: 'POST',
           headers,
           body: JSON.stringify({
-            messages: [{ type: 'text', text }]
+            messages: lineMessages
           })
         });
         const resData = await response.json();
@@ -354,10 +407,10 @@ app.post("/api/queues", (req, res) => {
   if (isCampaign) {
     const campaignStartRecord = db.prepare("SELECT value FROM system_settings WHERE key = 'campaign_start_date'").get() as any;
     const campaignEndRecord = db.prepare("SELECT value FROM system_settings WHERE key = 'campaign_end_date'").get() as any;
-    const campStart = campaignStartRecord?.value || new Date().toISOString().split('T')[0];
+    const campStart = campaignStartRecord?.value || getThailandTimeStr().split('T')[0];
     const campEnd = campaignEndRecord?.value;
 
-    const checkDate = appointment_date || new Date().toISOString().split('T')[0];
+    const checkDate = appointment_date || getThailandTimeStr().split('T')[0];
     if (checkDate < campStart) {
        return res.status(400).json({ error: `ไม่สามารถจองคิวนอกเวลาที่กำหนดได้ (เปิดจองตั้งแต่ ${campStart})` });
     }
@@ -368,7 +421,7 @@ app.post("/api/queues", (req, res) => {
   
   // For Mass Campaign Booking, do automatic load balancing if slot isn't specifically provided
   if (isCampaign && !validSlotId) {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getThailandTimeStr().split('T')[0];
     const checkDate = appointment_date || today;
     const availableSlots = db.prepare(`
        SELECT ts.id, ts.capacity,
@@ -390,7 +443,7 @@ app.post("/api/queues", (req, res) => {
 
   // Capacity check
   if (validSlotId) {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getThailandTimeStr().split('T')[0];
     const checkDate = appointment_date || today;
     const slotData = db.prepare('SELECT capacity FROM time_slots WHERE id = ?').get(validSlotId) as { capacity: number };
     const currentBookings = db.prepare('SELECT count(*) as count FROM queues WHERE slot_id = ? AND (date(created_at) = ? OR appointment_date = ?)').get(validSlotId, checkDate, checkDate) as { count: number };
@@ -416,7 +469,7 @@ app.post("/api/queues", (req, res) => {
   const queueId = randomUUID();
   const fastTrackVal = is_fast_track ? 1 : 0;
   const queueNumber = generateQueueNumber(service_id, fastTrackVal === 1);
-  const now = new Date().toISOString();
+  const now = getThailandTimeStr();
   const apptDate = appointment_date || now.split('T')[0];
 
   db.prepare(`
@@ -436,7 +489,7 @@ app.post("/api/queues", (req, res) => {
 });
 
 app.get("/api/queues", (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
+  const today = getThailandTimeStr().split('T')[0];
   // Smart Flow Logic:
   // 1. Online patients get a 'sorting_time' based on their slot's start time.
   // 2. Walk-in patients get a 'sorting_time' based on their creation time.
@@ -470,7 +523,7 @@ app.get("/api/queues", (req, res) => {
 });
 
 app.get("/api/queues/number/:queueNumber", (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
+  const today = getThailandTimeStr().split('T')[0];
   const queueRow = db.prepare(`SELECT id FROM queues WHERE queue_number = ? AND (date(created_at) = ? OR appointment_date = ?) ORDER BY created_at DESC LIMIT 1`).get(req.params.queueNumber.toUpperCase(), today, today) as { id: string } | undefined;
   
   if (!queueRow) return res.status(404).json({ error: "ไม่พบคิวนี้ในระบบสำหรับวันนี้" });
@@ -488,7 +541,7 @@ app.get("/api/queues/:id", (req, res) => {
 app.patch("/api/queues/:id/status", (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
-  const now = new Date().toISOString();
+  const now = getThailandTimeStr();
 
   let updateQuery = 'UPDATE queues SET status = ? WHERE id = ?';
   const params: any[] = [status, id];
@@ -511,7 +564,7 @@ app.patch("/api/queues/:id/status", (req, res) => {
     triggerLineNotification(updatedQueue, status);
     
     // Notify the queue that is 3 spots away
-    const today = updatedQueue.appointment_date || new Date().toISOString().split('T')[0];
+    const today = updatedQueue.appointment_date || getThailandTimeStr().split('T')[0];
     const upcomingQueues = db.prepare(`
       SELECT id FROM queues 
       WHERE service_id = ? AND status = 'Waiting' AND (date(created_at) = ? OR appointment_date = ?)
@@ -528,6 +581,18 @@ app.patch("/api/queues/:id/status", (req, res) => {
     }
   }
 
+  res.json(updatedQueue);
+});
+
+app.post("/api/queues/:id/rate", (req, res) => {
+  const { id } = req.params;
+  const { score } = req.body;
+  if (typeof score !== 'number' || score < 1 || score > 5) {
+    return res.status(400).json({ error: "Invalid score" });
+  }
+  db.prepare('UPDATE queues SET satisfaction_score = ? WHERE id = ?').run(score, id);
+  const updatedQueue = getQueueDetails(id);
+  app.get('io').emit('queue_updated', updatedQueue);
   res.json(updatedQueue);
 });
 
@@ -681,7 +746,10 @@ app.get("/api/line-logs", (req, res) => {
 });
 
 app.get("/api/analytics", (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
+  const { start, end } = req.query as { start?: string, end?: string };
+  const todayStr = getThailandTimeStr().split('T')[0];
+  const startDate = start || todayStr;
+  const endDate = end || todayStr;
   
   const dailyStats = db.prepare(`
     SELECT 
@@ -689,38 +757,93 @@ app.get("/api/analytics", (req, res) => {
       sum(case when booking_type = 'Online' then 1 else 0 end) as online,
       sum(case when booking_type = 'Walk-in' then 1 else 0 end) as walkin
     FROM queues 
-    WHERE date(created_at) = ?
-  `).get(today);
+    WHERE date(created_at) >= ? AND date(created_at) <= ?
+  `).get(startDate, endDate);
 
   const serviceStats = db.prepare(`
     SELECT s.service_name as name, count(*) as value
     FROM queues q
     JOIN services s ON q.service_id = s.id
-    WHERE date(q.created_at) = ?
+    WHERE date(q.created_at) >= ? AND date(q.created_at) <= ?
     GROUP BY q.service_id
-  `).all(today);
+  `).all(startDate, endDate);
 
   // Peak times (hourly grouping)
   const peakTimes = db.prepare(`
     SELECT strftime('%H:00', created_at) as hour, count(*) as count
     FROM queues
+    WHERE date(created_at) >= ? AND date(created_at) <= ?
     GROUP BY strftime('%H', created_at)
-  `).all();
+  `).all(startDate, endDate);
 
-  // Average wait time (in minutes) for completed queues today
+  // Average wait time (in minutes) for completed queues
   const waitTime = db.prepare(`
     SELECT 
       avg((julianday(called_at) - julianday(created_at)) * 24 * 60) as avg_wait_mins
     FROM queues
-    WHERE date(created_at) = ? AND status IN ('Completed') AND called_at IS NOT NULL
-  `).get(today) as any;
+    WHERE date(created_at) >= ? AND date(created_at) <= ? AND status IN ('Completed') AND called_at IS NOT NULL
+  `).get(startDate, endDate) as any;
+
+  // Average satisfaction score (1-5 to percentage)
+  const satisfaction = db.prepare(`
+    SELECT avg(satisfaction_score) as avg_score
+    FROM queues
+    WHERE date(created_at) >= ? AND date(created_at) <= ? AND satisfaction_score IS NOT NULL
+  `).get(startDate, endDate) as any;
+  const avgSatisfacton = satisfaction?.avg_score || 0;
+  const satisfactionPercentage = avgSatisfacton > 0 ? Math.round((avgSatisfacton / 5) * 100) : 0;
 
   res.json({
     dailyStats,
     serviceStats,
     peakTimes,
-    avgWaitTimeMins: Math.round(waitTime?.avg_wait_mins || 0)
+    avgWaitTimeMins: Math.round(waitTime?.avg_wait_mins || 0),
+    satisfactionPercentage
   });
+});
+
+app.get("/api/admin/no-shows", (req, res) => {
+  try {
+    const list = db.prepare(`
+      SELECT q.*, u.full_name, u.citizen_id, u.phone, u.line_uid, s.service_name, s.color_code, s.estimated_minutes
+      FROM queues q
+      JOIN users u ON q.patient_id = u.id
+      JOIN services s ON q.service_id = s.id
+      WHERE q.status = 'No-show'
+      ORDER BY q.created_at DESC
+    `).all() as any[];
+
+    const totalCount = list.length;
+    const onlineCount = list.filter(q => q.booking_type === 'Online').length;
+    const walkinCount = list.filter(q => q.booking_type === 'Walk-in').length;
+
+    const byServiceMap: Record<string, { id: string; name: string; count: number; color: string }> = {};
+    list.forEach(q => {
+      if (!byServiceMap[q.service_id]) {
+        byServiceMap[q.service_id] = {
+          id: q.service_id,
+          name: q.service_name,
+          count: 0,
+          color: q.color_code || "#3B82F6"
+        };
+      }
+      byServiceMap[q.service_id].count++;
+    });
+    const byService = Object.values(byServiceMap);
+
+    res.json({
+      success: true,
+      list,
+      stats: {
+        total: totalCount,
+        online: onlineCount,
+        walkin: walkinCount,
+        byService
+      }
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to fetch no-shows" });
+  }
 });
 
 let geminiAiClient: GoogleGenAI | null = null;
@@ -819,7 +942,7 @@ function getQueueDetails(id: string) {
 
 // Add Cron Job Simulation Route
 app.post("/api/admin/cron/defaulter-tracking", (req, res) => {
-  const today = new Date().toISOString().split('T')[0];
+  const today = getThailandTimeStr().split('T')[0];
   // Find all waiting queues that are for medicinal refill or have not completed by end of day
   const defaulters = db.prepare(`
     SELECT q.id FROM queues q 
@@ -876,7 +999,7 @@ async function startServer() {
 
   // Background Process for Notifications (1 hour before queue)
   setInterval(() => {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getThailandTimeStr().split('T')[0];
     
     // Check queues that have preferred_time (HH:mm - HH:mm) or (HH:mm)
     const upcomingQueues = db.prepare(`
