@@ -14,63 +14,108 @@ const API_KEY = process.env.GOOGLE_MAPS_PLATFORM_KEY || '';
 
 const socket = io();
 
+function getHaversineDistance(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371; // Radius of the earth in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2); 
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+  return R * c; // Distance in km
+}
+
 function TravelTimeDisplay({ hospitalLat, hospitalLng, mapLink }: { hospitalLat: number, hospitalLng: number, mapLink?: string }) {
   const routesLib = useMapsLibrary('routes');
   const [travelTime, setTravelTime] = useState<string | null>(null);
+  const [distance, setDistance] = useState<string | null>(null);
   const [tracking, setTracking] = useState(false);
+  const [isFallback, setIsFallback] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const checkLocation = () => {
-    if (!API_KEY) {
-      if (mapLink) {
-        window.open(mapLink, '_blank');
-      } else {
-        setError('ไม่พบการตั้งค่า API Key หรือ ลิงก์แผนที่');
-      }
-      return;
-    }
-
     if (!navigator.geolocation) {
-      setError('เบราว์เซอร์ไม่รองรับการเช็คตำแหน่ง');
+      setError('เบราว์เซอร์ไม่รองรับการเข้าถึงตำแหน่งที่ตั้ง');
       return;
     }
 
     setTracking(true);
     setError(null);
+
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const userLoc = {
           lat: position.coords.latitude,
           lng: position.coords.longitude
         };
-        
-        if (routesLib) {
+
+        // If Google Maps Route API is available, compute the active road route
+        if (API_KEY && routesLib) {
           routesLib.Route.computeRoutes({
             origin: userLoc,
             destination: { lat: hospitalLat, lng: hospitalLng },
             travelMode: 'DRIVING',
-            fields: ['durationMillis'],
+            fields: ['durationMillis', 'distanceMeters'],
           }).then(({ routes }) => {
-            if (routes?.[0]?.durationMillis) {
-              const mins = Math.ceil(parseInt(routes[0].durationMillis as any) / 60000);
-              setTravelTime(`${mins} นาที`);
+            if (routes?.[0]) {
+              if (routes[0].durationMillis) {
+                const mins = Math.ceil(parseInt(routes[0].durationMillis as any) / 60000);
+                setTravelTime(`${mins} นาที`);
+              }
+              if (routes[0].distanceMeters) {
+                const km = (routes[0].distanceMeters / 1000).toFixed(1);
+                setDistance(`${km} กม.`);
+              }
+              setIsFallback(false);
+              setError(null);
+            } else {
+              // Failover to client-side geodesic math if Route service found nothing
+              calculateLocalEstimation(userLoc);
             }
             setTracking(false);
           }).catch(err => {
-            console.error(err);
-            setError('ไม่สามารถคำนวณระยะทางได้ (เช็คในแอป Google Maps แทน)');
+            console.error('Routes estimation error, falling back:', err);
+            calculateLocalEstimation(userLoc);
             setTracking(false);
           });
+        } else {
+          // If no GCP keys or maps routes are configured yet, calculate local geodesic path
+          calculateLocalEstimation(userLoc);
+          setTracking(false);
         }
       },
       (err) => {
-        console.error(err);
-        setError('กรุณาอนุญาตการเข้าถึงตำแหน่งที่ตั้ง');
+        console.error('Geolocation error:', err);
+        setError('กรุณาอนุญาตการเข้าถึงข้อมูลตำแหน่งเพื่อเช็คเวลาเดินทางไปยัง รพ.สต.');
         setTracking(false);
       },
-      { enableHighAccuracy: true }
+      { enableHighAccuracy: true, timeout: 8000 }
     );
   };
+
+  const calculateLocalEstimation = (userLoc: { lat: number, lng: number }) => {
+    try {
+      const distKm = getHaversineDistance(userLoc.lat, userLoc.lng, hospitalLat, hospitalLng);
+      // Driving routes are typically ~1.3 times the straight line distance
+      const adjustedDist = distKm * 1.3;
+      // Assume speed is ~40 km/h (1.5 minutes per km)
+      // If the distance is extremely short (e.g., under 500m), set standard walk/drive time
+      const estimatedMins = Math.max(1, Math.ceil(adjustedDist * 1.5));
+      
+      setDistance(`${distKm.toFixed(1)} กม.`);
+      setTravelTime(`${estimatedMins} นาที`);
+      setIsFallback(true);
+      setError(null);
+    } catch (e) {
+      setError('ไม่สามารถประมาณระยะทางได้ในขณะนี้');
+    }
+  };
+
+  // Automatically check on load so patients see it immediately
+  useEffect(() => {
+    checkLocation();
+  }, [routesLib, hospitalLat, hospitalLng]);
 
   const openInApp = () => {
     if (mapLink) {
@@ -81,45 +126,76 @@ function TravelTimeDisplay({ hospitalLat, hospitalLng, mapLink }: { hospitalLat:
   };
 
   return (
-    <div className="bg-slate-50 border-2 border-slate-200 rounded-2xl p-4 mt-6">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-          <MapPin className="w-4 h-4 text-rose-500" />
-          เช็คระยะเวลาเดินทาง
+    <div className="bg-white border-2 border-teal-50 rounded-2xl p-5 mt-6 shadow-sm relative overflow-hidden">
+      <div className="absolute top-0 right-0 w-32 h-32 bg-teal-50/20 rounded-full blur-2xl -mr-16 -mt-16 pointer-events-none" />
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+        <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
+          <div className="p-2 bg-teal-50 text-teal-600 rounded-xl">
+            <MapPin className="w-4 h-4 text-emerald-600 animate-bounce" />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-sm font-bold text-slate-900 leading-tight">เช็คระยะเวลาเดินทางไปยัง รพ.สต.</span>
+            <span className="text-[10px] text-slate-400 font-medium leading-none mt-0.5">คำนวณจากพิกัดตำแหน่งของคุณ ณ ปัจจุบัน</span>
+          </div>
         </h3>
         <div className="flex gap-2">
           <button 
             type="button"
             onClick={checkLocation}
             disabled={tracking}
-            className="text-[10px] font-bold bg-white border border-slate-300 px-2 py-1.5 rounded-lg hover:bg-slate-50 active:scale-95 transition-all text-slate-700 shadow-sm flex items-center gap-1"
+            className="text-[11px] font-black bg-slate-50 border-2 border-slate-100 px-3 py-2 rounded-xl hover:bg-slate-100 active:scale-95 transition-all text-slate-700 flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
           >
-            {tracking ? 'กำลังคำนวณ...' : 'เช็คกี่นาที'}
+            {tracking ? (
+              <>
+                <div className="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
+                กำลังคำนวณ...
+              </>
+            ) : 'คำนวณใหม่'}
           </button>
           <button 
             type="button"
             onClick={openInApp}
-            className="text-[10px] font-bold bg-teal-50 border border-teal-200 px-2 py-1.5 rounded-lg hover:bg-teal-100 active:scale-95 transition-all text-teal-700 shadow-sm flex items-center gap-1"
+            className="text-[11px] font-black bg-teal-600 hover:bg-teal-700 text-white border-2 border-teal-600 px-3 py-2 rounded-xl active:scale-95 transition-all flex items-center gap-1 cursor-pointer"
           >
-            <ExternalLink className="w-3 h-3" />
-            เปิดแผนที่
+            <Navigation className="w-3.5 h-3.5 fill-white" />
+            นำทางแผนที่
           </button>
         </div>
       </div>
 
       {travelTime && (
-        <div className="bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl p-3 flex items-center justify-between animate-in zoom-in-95 fill-mode-both">
-          <span className="text-[10px] font-bold uppercase tracking-wider">ประมาณการเวลาเดินทาง:</span>
-          <span className="text-base font-black">{travelTime}</span>
+        <div className="bg-teal-50/50 border-2 border-teal-100 text-teal-800 rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-in zoom-in-95 fill-mode-both duration-300">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-teal-100 rounded-xl flex items-center justify-center font-black text-teal-600 text-lg shadow-sm">
+              🚗
+            </div>
+            <div className="flex flex-col">
+              <span className="text-xs text-teal-600/70 font-bold leading-tight uppercase tracking-wider">ประมาณการเดินทางโดยรถ</span>
+              <span className="text-xl font-black text-teal-900 mt-0.5">{travelTime} {distance ? `(${distance})` : ''}</span>
+            </div>
+          </div>
+          <div className="text-[10px] text-teal-700/80 font-medium">
+            {isFallback ? (
+              <span className="bg-white/80 border border-teal-100 px-2 py-1 rounded-lg">คำนวณด้วยพิกัดทางตรง (ออฟไลน์)</span>
+            ) : (
+              <span className="bg-emerald-100 text-emerald-800 px-2 py-1 rounded-lg font-bold">เส้นทางขับรถจริง (Google Maps)</span>
+            )}
+          </div>
         </div>
       )}
 
       {error && (
-        <p className="text-[9px] text-rose-500 font-bold mt-1">⚠️ {error}</p>
+        <div className="bg-amber-50 text-amber-800 border-2 border-amber-100 rounded-xl p-3 flex items-start gap-2.5 mt-2">
+          <span className="text-base shrink-0">📍</span>
+          <div className="flex flex-col">
+            <p className="text-xs font-bold leading-normal">{error}</p>
+            <p className="text-[10px] text-amber-700/80 font-medium mt-0.5">ท่านสามารถกดปุ่ม "นำทางแผนที่" ด้านบนเพื่อดูเส้นทางผ่านแอปได้ทันทีค่ะ</p>
+          </div>
+        </div>
       )}
       
       {!travelTime && !error && !tracking && (
-        <p className="text-[10px] text-slate-400">ระบบจะช่วยคำนวณเวลาที่ใช้เดินทางมายัง รพ.สต. เพื่อให้ท่านกะเวลาออกจากบ้านได้ถูกต้อง</p>
+        <p className="text-[11px] text-slate-400 font-medium">ระบบจะของพิกัดตำแหน่งปัจจุบันของท่านโดยอัตโนมัติเพื่อวิเคราะห์เวลาและระยะทางไปยัง รพ.สต. ให้เหมาะสม</p>
       )}
     </div>
   );
@@ -199,8 +275,9 @@ export default function Patient() {
     if (serviceId) query.append('service_id', serviceId);
     if (appointmentDate) query.append('date', appointmentDate);
     fetch(`/api/slots?${query.toString()}`)
-      .then(res => res.json())
-      .then(data => setSlots(data));
+      .then(res => { if (!res.ok) throw new Error(); return res.json(); })
+      .then(data => setSlots(data))
+      .catch(() => {});
   }, [serviceId, appointmentDate]);
 
   // Dynamically compute reservation slots between staff range
@@ -236,11 +313,12 @@ export default function Patient() {
 
   useEffect(() => {
     fetch('/api/services')
-      .then(res => res.json())
-      .then(data => setServices(data));
+      .then(res => { if (!res.ok) throw new Error(); return res.json(); })
+      .then(data => setServices(data))
+      .catch(() => {});
 
     fetch('/api/settings')
-      .then(res => res.json())
+      .then(res => { if (!res.ok) throw new Error(); return res.json(); })
       .then(data => {
         if (data.service_open_time) setOpenTime(data.service_open_time);
         if (data.service_close_time) setCloseTime(data.service_close_time);
@@ -304,6 +382,11 @@ export default function Patient() {
       if (data.campaign_desc !== undefined) setCampaignDesc(data.campaign_desc);
       if (data.campaign_start_date !== undefined) setCampaignStartDate(data.campaign_start_date);
       if (data.campaign_end_date !== undefined) setCampaignEndDate(data.campaign_end_date);
+      if (data.hospital_lat !== undefined) setHospitalLat(parseFloat(data.hospital_lat));
+      if (data.hospital_lng !== undefined) setHospitalLng(parseFloat(data.hospital_lng));
+      if (data.hospital_map_link !== undefined) setMapLink(data.hospital_map_link);
+      if (data.service_open_time !== undefined) setOpenTime(data.service_open_time);
+      if (data.service_close_time !== undefined) setCloseTime(data.service_close_time);
     });
 
     socket.on('services_updated', (updated: Service[]) => {
@@ -313,8 +396,9 @@ export default function Patient() {
     socket.on('slots_updated', () => {
       // Re-fetch slots when updated
       fetch(`/api/slots?date=${new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().split('T')[0]}`)
-      .then(res => res.json())
-      .then(data => setSlots(data));
+      .then(res => { if (!res.ok) throw new Error(); return res.json(); })
+      .then(data => setSlots(data))
+      .catch(() => {});
     });
 
     return () => {
@@ -386,7 +470,7 @@ export default function Patient() {
 
   const listenVoice = (onResult: (text: string) => void) => {
     if (!isVoiceActiveRef.current) return;
-    const SpeechRecognition = window.SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
       alert("เบราว์เซอร์ไม่รองรับการสั่งงานด้วยเสียง");
       setVoiceActive(false);
@@ -432,6 +516,7 @@ export default function Patient() {
     let pnum = '';
     let sid = '';
     let ptime = '';
+    let pslotId: number | null = null;
 
     const askService = () => {
        const activeServices = services.filter(s => s.is_active !== 0 && s.id !== 'service_campaign');
@@ -460,61 +545,113 @@ export default function Patient() {
        });
     };
 
-    const askTime = () => {
-       const availableHours = Array.from(new Set(timeSlots.map(t => t.split(':')[0])));
-       const promptMsg = availableHours.length > 0 
-           ? "คุณต้องการมารับบริการเวลากี่โมงคะ มีรอบตั้งแต่ " + parseInt(availableHours[0], 10) + " นาฬิกา จนถึง " + parseInt(availableHours[availableHours.length - 1], 10) + " นาฬิกา"
-           : "คุณต้องการมารับบริการเวลากี่โมงคะ ระบุเวลาได้เลยค่ะ";
+    const formatToThaiSpokenTime = (timeStr: string) => {
+       const [hStr, mStr] = timeStr.split(':');
+       const h = parseInt(hStr, 10);
+       const m = parseInt(mStr, 10);
+       let spokenHour = '';
+       if (h === 8) spokenHour = 'แปดโมง';
+       else if (h === 9) spokenHour = 'เก้าโมง';
+       else if (h === 10) spokenHour = 'สิบโมง';
+       else if (h === 11) spokenHour = 'สิบเอ็ดโมง';
+       else if (h === 12) spokenHour = 'เที่ยง';
+       else if (h === 13) spokenHour = 'บ่ายโมง';
+       else if (h === 14) spokenHour = 'บ่ายสอง';
+       else if (h === 15) spokenHour = 'บ่ายสาม';
+       else if (h === 16) spokenHour = 'บ่ายสี่';
+       else spokenHour = `${h} นาฬิกา`;
 
-       speak(promptMsg, () => {
-         listenVoice((text) => {
-            let hour = '';
-            const hourMap: Record<string, string> = {
-               'แปด': '08', 'เก้า': '09', 'สิบโมง': '10', 'สิบนาฬิกา': '10', 'สิบเอ็ด': '11', 'สิบสอง': '12', 'เที่ยง': '12',
-               'บ่ายหนึ่ง': '13', 'บ่ายโมง': '13', 'สิบสาม': '13', 
-               'บ่ายสอง': '14', 'สิบสี่': '14', 
-               'บ่ายสาม': '15', 'สิบห้า': '15', 
-               'บ่ายสี่': '16', 'สิบหก': '16',
-               '8': '08', '9': '09', '10': '10', '11': '11', '12': '12', '13': '13', '14': '14', '15': '15', '16': '16',
-               'สิบ': '10'
-            };
+       const spokenMin = m === 30 ? 'ครึ่ง' : m > 0 ? `${m} นาที` : '';
+       return spokenHour + spokenMin;
+    };
 
-            for (const [key, val] of Object.entries(hourMap)) {
-               if (text.includes(key)) {
-                  hour = val;
-                  break;
-               }
-            }
+    const askTime = async () => {
+       try {
+          const query = new URLSearchParams();
+          if (sid) query.append('service_id', sid);
+          if (appointmentDate) query.append('date', appointmentDate);
+          
+          const res = await fetch(`/api/slots?${query.toString()}`);
+          if (!res.ok) throw new Error('Failed to fetch slots');
+          const fetchedSlots = await res.json();
+          const availableSlots = fetchedSlots.filter((slot: any) => slot.current_bookings < slot.capacity);
 
-            if (!hour && text.includes('เช้า')) hour = '09';
-            if (!hour && text.includes('บ่าย')) hour = '13';
+          if (availableSlots.length === 0) {
+             speak("ขออภัยด้วยค่ะ ไม่มีรอบบริการที่ว่างสำหรับบริการที่คุณเลือกในวันนี้เลยค่ะ ขอยกเลิกการจองคิวนะคะ");
+             setVoiceActive(false);
+             return;
+          }
 
-            let minute = '00';
-            if (text.includes('ครึ่ง') || text.includes('สามสิบ')) {
-               minute = '30';
-            }
+          const timeNames = availableSlots.map((s: any) => formatToThaiSpokenTime(s.start_time)).join(', ');
+          const promptMsg = `คุณต้องการมารับบริการเวลากี่โมงคะ ช่วงเวลาบริการที่ยังว่างอยู่ มีรอบ ${timeNames} สะดวกรับบริการรอบไหนดีคะ`;
 
-            const matchedSlot = timeSlots.find(t => t === `${hour}:${minute}`);
-            
-            if (matchedSlot) {
-                ptime = matchedSlot;
-                setPreferredTime(matchedSlot);
-                confirmValues();
-            } else if (hour) {
-                // fallback to any slot that starts with the hour if valid
-                const fallbackSlot = timeSlots.find(t => t.startsWith(hour));
-                if (fallbackSlot) {
-                   ptime = fallbackSlot;
-                   setPreferredTime(fallbackSlot);
-                   confirmValues();
-                } else {
-                   speak("เวลานี้ไม่อยู่ในรอบให้บริการค่ะ รบกวนบอกเวลาใหม่อีกครั้งนะคะ", () => askTime());
+          speak(promptMsg, () => {
+             listenVoice((text) => {
+                let hour = '';
+                const hourMap: Record<string, string> = {
+                   'แปด': '08', 'เก้า': '09', 'สิบโมง': '10', 'สิบนาฬิกา': '10', 'สิบเอ็ด': '11', 'สิบสอง': '12', 'เที่ยง': '12',
+                   'บ่ายหนึ่ง': '13', 'บ่ายโมง': '13', 'สิบสาม': '13', 
+                   'บ่ายสอง': '14', 'สิบสี่': '14', 
+                   'บ่ายสาม': '15', 'สิบห้า': '15', 
+                   'บ่ายสี่': '16', 'สิบหก': '16',
+                   '8': '08', '9': '09', '10': '10', '11': '11', '12': '12', '13': '13', '14': '14', '15': '15', '16': '16',
+                   'สิบ': '10'
+                };
+
+                for (const [key, val] of Object.entries(hourMap)) {
+                   if (text.includes(key)) {
+                      hour = val;
+                      break;
+                   }
                 }
-            } else {
-                speak("ฟังเวลาไม่ชัดค่ะ รบกวนบอกเวลาใหม่อีกครั้งนะคะ เช่น เก้าโมงเช้า หรือ บ่ายสอง", () => askTime());
-            }
-         });
-       });
+
+                if (!hour && text.includes('เช้า')) hour = '09';
+                if (!hour && text.includes('บ่าย')) hour = '13';
+
+                let minute = '00';
+                if (text.includes('ครึ่ง') || text.includes('สามสิบ') || text.includes('30')) {
+                   minute = '30';
+                }
+
+                let matchedSlot = availableSlots.find((slot: any) => {
+                   const [sh, sm] = slot.start_time.split(':');
+                   return sh === hour && sm === minute;
+                });
+
+                if (!matchedSlot && hour) {
+                   matchedSlot = availableSlots.find((slot: any) => {
+                      const [sh] = slot.start_time.split(':');
+                      return sh === hour;
+                   });
+                }
+
+                if (!matchedSlot) {
+                   if (text.includes('รอบแรก') || text.includes('แรกสุด') || text.includes('รอบที่หนึ่ง') || text.includes('รอบ 1')) {
+                      matchedSlot = availableSlots[0];
+                   } else if (text.includes('รอบสอง') || text.includes('รอบที่สอง') || text.includes('รอบ 2')) {
+                      matchedSlot = availableSlots[1];
+                   } else if (text.includes('รอบที่สาม') || text.includes('รอบ 3')) {
+                      matchedSlot = availableSlots[2];
+                   } else if (text.includes('รอบสุดท้าย') || text.includes('รอบหลังสุด') || text.includes('หลังสุด')) {
+                      matchedSlot = availableSlots[availableSlots.length - 1];
+                   }
+                }
+
+                if (matchedSlot) {
+                    ptime = `${matchedSlot.start_time} - ${matchedSlot.end_time}`;
+                    pslotId = matchedSlot.id;
+                    setSlotId(matchedSlot.id);
+                    setPreferredTime(ptime);
+                    confirmValues();
+                } else {
+                    speak("เวลานี้ไม่มีรอบให้บริการที่เลือกหรือคิวเต็มแล้วค่ะ รบกวนบอกเวลาใหม่อีกครั้งนะคะ", () => askTime());
+                }
+             });
+          });
+       } catch (err) {
+          speak("ระบบขออภัยด้วยค่ะ ไม่สามารถโหลดช่วงเวลาบริการได้ชั่วคราว ขอยกเลิกการทำรายการนะคะ");
+          setVoiceActive(false);
+       }
     };
 
     const confirmValues = () => {
@@ -524,7 +661,7 @@ export default function Patient() {
          listenVoice((text) => {
            if (text.includes('ยืนยัน') || text.includes('ใช่') || text.includes('โอเค') || text.includes('ตกลง') || text.includes('ครับ') || text.includes('ค่ะ')) {
              speak("ระบบกำลังบันทึกข้อมูลและจองคิวให้ค่ะ", () => {
-               submitVoiceBooking(fname, cid, pnum, sid, ptime);
+               submitVoiceBooking(fname, cid, pnum, sid, ptime, pslotId);
              });
            } else {
              speak("ยกเลิกการจองคิวแล้วค่ะ ขอบคุณค่ะ");
@@ -567,7 +704,7 @@ export default function Patient() {
     });
   };
 
-  const submitVoiceBooking = async (fname: string, cid: string, pnum: string, sid: string, ptime?: string) => {
+  const submitVoiceBooking = async (fname: string, cid: string, pnum: string, sid: string, ptime?: string, slotIdParam?: string | number | null) => {
     setVoiceActive(false);
     setLoading(true);
     setErrorMessage(null);
@@ -584,7 +721,7 @@ export default function Patient() {
           booking_type: 'Online',
           line_uid: lineUid,
           preferred_time: ptime || preferredTime || (timeSlots[0] || ''),
-          slot_id: slotId,
+          slot_id: slotIdParam || slotId,
           is_fast_track: false,
           appointment_date: appointmentDate
         })
@@ -957,6 +1094,10 @@ export default function Patient() {
                     <p>ถึงคิวของคุณแล้ว กรุณาติดต่อที่เคาน์เตอร์พยาบาลหรือหน้าห้องตรวจค่ะ</p>
                   </div>
                 )}
+              </div>
+
+              <div className="w-full">
+                <TravelTimeDisplay hospitalLat={hospitalLat} hospitalLng={hospitalLng} mapLink={mapLink} />
               </div>
               
               {myQueue.status === 'Completed' && (

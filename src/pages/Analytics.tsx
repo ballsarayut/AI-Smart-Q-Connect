@@ -58,8 +58,9 @@ export default function Analytics() {
   useEffect(() => {
     const fetchAnalytics = () => {
       fetch(`/api/analytics?start=${startDate}&end=${endDate}`)
-        .then(res => res.json())
-        .then(data => setStats(data));
+        .then(res => { if (!res.ok) throw new Error(); return res.json(); })
+        .then(data => setStats(data))
+        .catch(() => {});
     };
     
     fetchAnalytics();
@@ -79,6 +80,7 @@ export default function Analytics() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(stats)
       });
+      if (!response.ok) throw new Error();
       const data = await response.json();
       setInsights(data.insights);
     } catch (err) {

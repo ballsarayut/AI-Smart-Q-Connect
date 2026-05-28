@@ -77,15 +77,24 @@ export default function Admin() {
   };
 
   const fetchQueues = () => {
-    fetch('/api/queues').then(res => res.json()).then(data => setQueues(data));
+    fetch('/api/queues')
+      .then(res => { if (!res.ok) throw new Error(); return res.json(); })
+      .then(data => setQueues(data))
+      .catch(() => {});
   };
 
   const fetchSlots = () => {
-    fetch('/api/admin/slots').then(res => res.json()).then(data => setSlots(data));
+    fetch('/api/admin/slots')
+      .then(res => { if (!res.ok) throw new Error(); return res.json(); })
+      .then(data => setSlots(data))
+      .catch(() => {});
   };
 
   const fetchServices = () => {
-    fetch('/api/services').then(res => res.json()).then(data => setServices(data));
+    fetch('/api/services')
+      .then(res => { if (!res.ok) throw new Error(); return res.json(); })
+      .then(data => setServices(data))
+      .catch(() => {});
   };
 
   useEffect(() => {
@@ -136,7 +145,7 @@ export default function Admin() {
     });
 
     socket.on('slots_updated', () => {
-      fetch('/api/admin/slots').then(res => res.json()).then(data => setSlots(data));
+      fetchSlots();
     });
 
     return () => {
@@ -222,6 +231,9 @@ export default function Admin() {
         })
       });
       if (res.ok) {
+        const data = await res.json();
+        if (data.hospital_lat) setHospitalLat(data.hospital_lat);
+        if (data.hospital_lng) setHospitalLng(data.hospital_lng);
         setSaveSuccess(true);
         setTimeout(() => setSaveSuccess(false), 2000);
       }
@@ -561,8 +573,29 @@ export default function Admin() {
                   value={mapLink} 
                   onChange={e => parseMapLink(e.target.value)} 
                   className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-teal-500 focus:bg-white font-medium text-sm transition-all"
-                  placeholder="วางลิงก์ Google Maps ที่นี่..."
+                  placeholder="วางลิงก์ Google Maps ที่นี่ (สำหรับ short url กรณีที่ระบบดึงพิกัดไม่ได้ แนะนำให้กรอกละติจูดและลองจิจูดในช่องด้านล่างแทน)"
                 />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8 -mt-4">
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">ละติจูด (Latitude)</label>
+                  <input 
+                    type="text" 
+                    value={hospitalLat} 
+                    onChange={e => setHospitalLat(e.target.value)} 
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl p-3 outline-none focus:border-teal-500 font-medium text-sm transition-all"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">ลองจิจูด (Longitude)</label>
+                  <input 
+                    type="text" 
+                    value={hospitalLng} 
+                    onChange={e => setHospitalLng(e.target.value)} 
+                    className="w-full bg-slate-50 border border-slate-100 rounded-xl p-3 outline-none focus:border-teal-500 font-medium text-sm transition-all"
+                  />
+                </div>
               </div>
 
               <div className="flex flex-col gap-4 pt-8 border-t border-slate-50 mb-8">

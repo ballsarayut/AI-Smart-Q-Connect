@@ -265,7 +265,7 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
     if (queue.is_fast_track) {
        text += `\n🏃‍♂️ เนื่องจากเป็นคิว Fast-Track ท่านสามารถติดต่อช่องรับยาได้ทันทีโดยไม่ต้องรอซักประวัติ`;
     } else {
-       text += `\n👉 สามารถตรวจสอบสถานะคิวของคุณได้ทางสมาร์ทโฟน`;
+       text += `\n👉 สามารถตรวจสอบสถานะคิวของคุณได้ทางสมาร์ทโฟน\n👉 กรุณามาถึงก่อนเวลาที่จะถึงคิวอย่างน้อย 30 นาที`;
     }
   } else if (action === 'Calling') {
     text = `📣 ประกาศเรียกคิวเลขนมัสการ! (รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n• ชื่อคนไข้: ${queue.full_name}\n👉 กรุณาเข้าพบเจ้าหน้าที่ ณ จุดคัดกรองหรือห้องตรวจทันทีค่ะ`;
@@ -318,8 +318,9 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
   } else if (action === 'Approaching') {
     text = `⏳ ใกล้ถึงคิวของท่านแล้ว! (รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n👉 อีกประมาณ ${queue.people_in_front || 0} คิว (รอประมาณ ${queue.estimated_wait_time || 0} นาที) จะถึงคิวของท่าน กรุณาเตรียมตัวบริเวณจุดรอพักค่ะ`;
   } else if (action === 'Approaching_1hr') {
-    text = `⏰ แจ้งเตือนล่วงหน้า 1 ชั่วโมง (รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n• เวลาที่นัดหมาย: ${queue.preferred_time}\n👉 กรุณามาถึงก่อนเวลา เพื่อเตรียมตัวคัดกรองเบื้องต้นค่ะ`;
+    text = `⏰ แจ้งเตือนล่วงหน้า 1 ชั่วโมง (รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n• เวลาที่นัดหมาย: ${queue.preferred_time}\n👉 กรุณามาถึงก่อนเวลาที่จะถึงคิวอย่างน้อย 30 นาที เพื่อเตรียมตัวคัดกรองเบื้องต้นค่ะ`;
   }
+
 
   if (lineMessages.length === 0) {
     lineMessages = [{ type: 'text', text }];
@@ -684,8 +685,58 @@ app.post("/api/settings/test-line", async (req, res) => {
   }
 });
 
-app.post("/api/settings", (req, res) => {
+app.post("/api/settings", async (req, res) => {
   const { line_channel_access_token, line_liff_id, line_admin_uid, line_enable_broadcast, service_open_time, service_close_time, hospital_lat, hospital_lng, hospital_map_link, campaign_capacity, campaign_title, campaign_desc, campaign_start_date, campaign_end_date } = req.body;
+  
+  let resolvedLat = hospital_lat || "13.7563";
+  let resolvedLng = hospital_lng || "100.5018";
+
+  if (hospital_map_link) {
+    let targetUrl = hospital_map_link.trim();
+    // 1. Resolve short Google Maps link to long URL
+    if (targetUrl.includes("maps.app.goo.gl") || targetUrl.includes("goo.gl/maps")) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 4000);
+        const response = await fetch(targetUrl, {
+          method: 'GET',
+          redirect: 'follow',
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+          }
+        });
+        clearTimeout(timeoutId);
+        targetUrl = response.url;
+        console.log("Resolved short maps link to:", targetUrl);
+      } catch (e) {
+        console.error("Failed to resolve short map link:", e);
+      }
+    }
+
+    // 2. Extract coordinates
+    const coordRegex = /@(-?\d+\.\d+),(-?\d+\.\d+)/;
+    const match = targetUrl.match(coordRegex);
+    if (match) {
+      resolvedLat = match[1];
+      resolvedLng = match[2];
+    } else {
+      const qRegex = /[?&](q|query|ll)=(-?\d+\.\d+),(-?\d+\.\d+)/;
+      const qMatch = targetUrl.match(qRegex);
+      if (qMatch) {
+        resolvedLat = qMatch[2];
+        resolvedLng = qMatch[3];
+      } else {
+        const pathRegex = /\/(-?\d+\.\d+),(-?\d+\.\d+)/;
+        const pathMatch = targetUrl.match(pathRegex);
+        if (pathMatch) {
+          resolvedLat = pathMatch[1];
+          resolvedLng = pathMatch[2];
+        }
+      }
+    }
+  }
+
   try {
     db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('line_channel_access_token', ?)").run(line_channel_access_token || "");
     db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('line_liff_id', ?)").run(line_liff_id || "");
@@ -693,8 +744,8 @@ app.post("/api/settings", (req, res) => {
     db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('line_enable_broadcast', ?)").run(line_enable_broadcast || "false");
     db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('service_open_time', ?)").run(service_open_time || "08:30");
     db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('service_close_time', ?)").run(service_close_time || "16:30");
-    db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('hospital_lat', ?)").run(hospital_lat || "13.7563");
-    db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('hospital_lng', ?)").run(hospital_lng || "100.5018");
+    db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('hospital_lat', ?)").run(resolvedLat);
+    db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('hospital_lng', ?)").run(resolvedLng);
     db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('hospital_map_link', ?)").run(hospital_map_link || "");
     if (campaign_capacity) {
       db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('campaign_capacity', ?)").run(campaign_capacity);
@@ -718,8 +769,8 @@ app.post("/api/settings", (req, res) => {
       line_enable_broadcast,
       service_open_time,
       service_close_time,
-      hospital_lat,
-      hospital_lng,
+      hospital_lat: resolvedLat,
+      hospital_lng: resolvedLng,
       hospital_map_link,
       campaign_capacity,
       campaign_title,
