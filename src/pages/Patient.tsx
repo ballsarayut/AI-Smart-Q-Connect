@@ -440,29 +440,41 @@ export default function Patient() {
     const utterance = new SpeechSynthesisUtterance(text);
     utteranceRef.current = utterance; // keep ref to prevent GC
     utterance.lang = 'th-TH';
-    utterance.rate = 0.9;
+    utterance.rate = 0.85; // Slightly slower for better comprehension
+    utterance.volume = 1;
     
-    // Fallback timer in case onend doesn't fire
+    const voices = window.speechSynthesis.getVoices();
+    const thaiVoice = voices.find(v => v.lang === 'th-TH' || v.lang === 'th');
+    if (thaiVoice) utterance.voice = thaiVoice;
+
+    let hasCalledOnEnd = false;
+    const callOnEnd = () => {
+       if (hasCalledOnEnd) return;
+       hasCalledOnEnd = true;
+       if (isVoiceActiveRef.current && onEnd) onEnd();
+    };
+
+    // Fallback timer in case onend doesn't fire (browser bug)
     const fallbackTimer = setTimeout(() => {
         if (isVoiceActiveRef.current && voiceStatus === 'speaking') {
-           if (onEnd) onEnd();
+           callOnEnd();
         }
-    }, text.length * 150 + 2000); // Rough estimate based on text length + 2s
+    }, text.length * 200 + 4000); // Generous fallback time
 
     utterance.onend = () => {
       clearTimeout(fallbackTimer);
       if (isVoiceActiveRef.current) {
         setTimeout(() => {
-            if (onEnd) onEnd();
-        }, 600); // Wait 600ms before starting mic to avoid overlap
+            callOnEnd();
+        }, 1500); // Wait 1.5s after speaking before opening mic (เว้นให้ตอบ)
       }
     };
     utterance.onerror = () => {
       clearTimeout(fallbackTimer);
       if (isVoiceActiveRef.current) {
         setTimeout(() => {
-            if (onEnd) onEnd();
-        }, 600);
+            callOnEnd();
+        }, 1500);
       }
     };
     window.speechSynthesis.speak(utterance);
@@ -526,6 +538,10 @@ export default function Patient() {
       stopVoiceAssistant();
       return;
     }
+
+    // Unlock speech synthesis immediately on user interaction (Required for iOS/Chrome mobile)
+    const unlockUtterance = new SpeechSynthesisUtterance('');
+    window.speechSynthesis.speak(unlockUtterance);
 
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
