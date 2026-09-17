@@ -483,33 +483,66 @@ export default function Patient() {
     recognition.lang = 'th-TH';
     recognition.interimResults = false;
     
-    recognition.onresult = (event: any) => {
-      const text = event.results[0][0].transcript || '';
-      onResult(text);
-    };
     recognition.onerror = (event: any) => {
       if (isVoiceActiveRef.current) {
         if (event.error === 'no-speech') {
            speak("ไม่ได้ยินเสียงเลยค่ะ รบกวนพูดใหม่อีกครั้งนะคะ", () => listenVoice(onResult));
+        } else if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+           setVoiceActive(false);
+           alert("ไม่สามารถใช้งานไมโครโฟนได้ กรุณาอนุญาตการเข้าถึงไมโครโฟนบนเบราว์เซอร์");
+        } else if (event.error === 'network') {
+           setVoiceActive(false);
+           alert("ไม่สามารถเชื่อมต่ออินเทอร์เน็ตได้ หรือเบราว์เซอร์ไม่รองรับการแปลงเสียงในขณะนี้");
+        } else if (event.error === 'aborted') {
+           // Do nothing, we probably cancelled it ourselves
         } else {
-           speak("ระบบขัดข้องค่ะ รบกวนพูดใหม่อีกครั้งนะคะ", () => listenVoice(onResult));
+           speak("ระบบรับเสียงมีปัญหาค่ะ รบกวนพูดใหม่อีกครั้งนะคะ", () => listenVoice(onResult));
         }
       }
     };
+    let hasResult = false;
+    recognition.onresult = (event: any) => {
+      hasResult = true;
+      const text = event.results[0][0].transcript || '';
+      onResult(text);
+    };
     recognition.onend = () => {
-        // Just in case it ends without result or error
+        if (isVoiceActiveRef.current && !hasResult && voiceStatus === 'listening') {
+             // It stopped listening but no result and no error was fired (sometimes happens on mobile)
+             speak("ไม่ได้ยินเสียงเลยค่ะ รบกวนพูดใหม่อีกครั้งนะคะ", () => listenVoice(onResult));
+        }
     };
     
     try {
       recognition.start();
-    } catch (e) {}
+    } catch (e) {
+      console.error(e);
+      if (isVoiceActiveRef.current) setVoiceActive(false);
+    }
   };
 
-  const startVoiceAssistant = () => {
+  const startVoiceAssistant = async () => {
     if (isVoiceActiveRef.current) {
       stopVoiceAssistant();
       return;
     }
+
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+         alert("เบราว์เซอร์ของคุณไม่รองรับการใช้งานไมโครโฟน หรือไม่ได้เปิดผ่าน HTTPS");
+         return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach(track => track.stop());
+    } catch (err: any) {
+      if (err.name === 'NotFoundError' || (err.message && err.message.toLowerCase().includes('device not found'))) {
+         alert("ไม่พบไมโครโฟนบนอุปกรณ์ของคุณ กรุณาเชื่อมต่อไมโครโฟน");
+      } else {
+         alert("กรุณาอนุญาตการใช้งานไมโครโฟนในเบราว์เซอร์");
+      }
+      return;
+    }
+
     setVoiceActive(true);
     let cid = '';
     let fname = '';
