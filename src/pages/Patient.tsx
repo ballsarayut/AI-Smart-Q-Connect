@@ -483,11 +483,7 @@ export default function Patient() {
   const listenVoice = (onResult: (text: string) => void) => {
     if (!isVoiceActiveRef.current) return;
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      alert("เบราว์เซอร์ไม่รองรับการสั่งงานด้วยเสียง");
-      setVoiceActive(false);
-      return;
-    }
+    if (!SpeechRecognition) return;
     
     setVoiceStatus('listening');
     const recognition = new SpeechRecognition();
@@ -545,7 +541,13 @@ export default function Patient() {
 
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-         alert("เบราว์เซอร์ของคุณไม่รองรับการใช้งานไมโครโฟน หรือไม่ได้เปิดผ่าน HTTPS");
+         if (liff.isInClient()) {
+            if (confirm("แอป LINE ไม่รองรับการใช้ไมโครโฟน ต้องการเปิดผ่าน Chrome/Safari เพื่อใช้งานระบบเสียงหรือไม่?")) {
+               liff.openWindow({ url: window.location.href, external: true });
+            }
+         } else {
+            alert("เบราว์เซอร์ของคุณไม่รองรับการใช้งานไมโครโฟน หรือไม่ได้เปิดผ่าน HTTPS");
+         }
          return;
       }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -554,7 +556,25 @@ export default function Patient() {
       if (err.name === 'NotFoundError' || (err.message && err.message.toLowerCase().includes('device not found'))) {
          alert("ไม่พบไมโครโฟนบนอุปกรณ์ของคุณ กรุณาเชื่อมต่อไมโครโฟน");
       } else {
-         alert("กรุณาอนุญาตการใช้งานไมโครโฟนในเบราว์เซอร์");
+         if (liff.isInClient()) {
+            if (confirm("แอป LINE ปิดกั้นการใช้ไมโครโฟน ต้องการเปิดผ่านเบราว์เซอร์หลัก (Chrome/Safari) เพื่อสั่งงานด้วยเสียงหรือไม่?")) {
+               liff.openWindow({ url: window.location.href, external: true });
+            }
+         } else {
+            alert("กรุณาอนุญาตการใช้งานไมโครโฟนในเบราว์เซอร์");
+         }
+      }
+      return;
+    }
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      if (liff.isInClient()) {
+         if (confirm("แอป LINE ไม่รองรับระบบสั่งงานด้วยเสียง ต้องการเปิดผ่านเบราว์เซอร์หลัก (Chrome/Safari) แทนหรือไม่?")) {
+            liff.openWindow({ url: window.location.href, external: true });
+         }
+      } else {
+         alert("เบราว์เซอร์นี้ไม่รองรับการสั่งงานด้วยเสียง แนะนำให้ใช้ Chrome หรือ Safari");
       }
       return;
     }
