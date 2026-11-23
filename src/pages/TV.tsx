@@ -2,9 +2,134 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import { Queue } from '../types';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Volume2, VolumeX, BellRing } from 'lucide-react';
+import {
+  ArrowLeft,
+  Volume2,
+  VolumeX,
+  BellRing,
+  HeartPulse,
+  Syringe,
+  Droplets,
+  ShieldAlert,
+  Pill,
+  Clock,
+  ChevronLeft,
+  ChevronRight,
+  Pause,
+  Play,
+  PhoneCall,
+  CheckCircle2,
+  BookOpen
+} from 'lucide-react';
 
 const socket = io();
+
+interface HealthTip {
+  id: string;
+  category: string;
+  title: string;
+  subtitle: string;
+  accentBg: string;
+  accentBorder: string;
+  accentText: string;
+  badgeBg: string;
+  icon: 'heart' | 'syringe' | 'droplets' | 'alert' | 'pill';
+  bullets: string[];
+  highlightNote: string;
+}
+
+const HEALTH_TIPS: HealthTip[] = [
+  {
+    id: 'ncds',
+    category: 'โรคไม่ติดต่อเรื้อรัง (NCDs)',
+    title: 'คุมความดัน-เบาหวาน ด้วยหลัก 3อ. 2ส.',
+    subtitle: 'ดูแลสุขภาพประจำวัน ลดความเสี่ยงภาวะแทรกซ้อนทางหัวใจและไต',
+    accentBg: 'from-teal-950/90 via-slate-900 to-slate-950',
+    accentBorder: 'border-teal-500/40',
+    accentText: 'text-teal-300',
+    badgeBg: 'bg-teal-500/20 text-teal-300 border-teal-400/30',
+    icon: 'heart',
+    bullets: [
+      'อาหาร: ลดหวาน มัน เค็ม เน้นผัก ผลไม้รสไม่หวานจัด และดื่มน้ำสะอาดวันละ 6-8 แก้ว',
+      'ออกกำลังกาย: เคลื่อนไหวร่างกายหรือเดินเร็วอย่างน้อยวันละ 30 นาที 5 วันต่อสัปดาห์',
+      'อารมณ์: ผ่อนคลายความเครียด นอนหลับพักผ่อนให้เพียงพอ 7-8 ชั่วโมง',
+      '2ส.: ไม่สูบบุหรี่ และไม่ดื่มเครื่องดื่มแอลกอฮอล์ รวมถึงรับประทานยาตามแพทย์สั่งอย่างสม่ำเสมอ'
+    ],
+    highlightNote: 'คำแนะนำ รพ.สต.: ควรมาตรวจวัดความดันและเจาะน้ำตาลปลายนิ้วตามนัดทุกครั้ง'
+  },
+  {
+    id: 'vaccine',
+    category: 'มหกรรมสุขภาพ / ฉีดวัคซีน',
+    title: 'ฉีดวัคซีนไข้หวัดใหญ่ประจำปี ลดป่วยรุนแรง',
+    subtitle: 'เสริมสร้างภูมิคุ้มกัน ป้องกันภาวะปอดอักเสบสำหรับประชาชนกลุ่มเสี่ยง',
+    accentBg: 'from-emerald-950/90 via-slate-900 to-slate-950',
+    accentBorder: 'border-emerald-500/40',
+    accentText: 'text-emerald-300',
+    badgeBg: 'bg-emerald-500/20 text-emerald-300 border-emerald-400/30',
+    icon: 'syringe',
+    bullets: [
+      'ผู้สูงอายุตั้งแต่ 65 ปีขึ้นไป และผู้ป่วยโรคเรื้อรัง 7 กลุ่มโรค ควรฉีดวัคซีนปีละ 1 ครั้ง',
+      'หญิงตั้งครรภ์ (อายุครรภ์ 4 เดือนขึ้นไป) และเด็กเล็ก 6 เดือน - 2 ปี สามารถรับบริการฟรี',
+      'หลังฉีดวัคซีน กรุณานั่งพักสังเกตอาการบริเวณจุดรอพักอย่างน้อย 30 นาที',
+      'อาจมีอาการปวดบวมบริเวณที่ฉีดหรือมีไข้ต่ำๆ 1-2 วัน สามารถประคบเย็นและดื่มน้ำมากๆ'
+    ],
+    highlightNote: 'สิทธิพิเศษ: จองคิวฉีดวัคซีนผ่าน LINE ได้ล่วงหน้า ไม่ต้องรอแออัด'
+  },
+  {
+    id: 'dengue',
+    category: 'ป้องกันโรคติดต่อในชุมชน',
+    title: 'กำจัดยุงลาย ด้วยมาตรการ "3 เก็บ ป้องกัน 3 โรค"',
+    subtitle: 'ป้องกันโรคไข้เลือดออก โรคไข้ปวดข้อยุงลาย และโรคติดเชื้อไวรัสซิกา',
+    accentBg: 'from-sky-950/90 via-slate-900 to-slate-950',
+    accentBorder: 'border-sky-500/40',
+    accentText: 'text-sky-300',
+    badgeBg: 'bg-sky-500/20 text-sky-300 border-sky-400/30',
+    icon: 'droplets',
+    bullets: [
+      'เก็บบ้านให้ปลอดโปร่ง ไม่ให้ยุงลายเกาะพักตามมุมมืดหรือกองเสื้อผ้า',
+      'เก็บขยะ เศษภาชนะ กะลา ยางรถยนต์เก่า ไม่ให้มีน้ำขังเป็นแหล่งเพาะพันธุ์',
+      'เก็บน้ำ ปิดฝาโอ่งหรือถังน้ำให้มิดชิด เปลี่ยนน้ำแจกันทุก 7 วัน หรือใส่ทรายอะเบท',
+      'หากมีไข้สูงลอย ปวดศีรษะ ปวดกระบอกตา ห้ามซื้อยาแก้ปวดกลุ่ม NSAIDs ทานเองเด็ดขาด'
+    ],
+    highlightNote: 'สังเกตอาการ: หากไข้ลดลงแต่มือเท้าเย็นหรือซึมลง ให้รีบพบแพทย์ทันที'
+  },
+  {
+    id: 'stroke',
+    category: 'สัญญาณเตือนภาวะฉุกเฉิน',
+    title: 'เช็กอาการโรคหลอดเลือดสมอง ด้วยหลัก F.A.S.T.',
+    subtitle: 'ทุกนาทีมีค่า ยิ่งถึงโรงพยาบาลเร็ว ยิ่งลดความพิการและเสียชีวิต',
+    accentBg: 'from-rose-950/90 via-slate-900 to-slate-950',
+    accentBorder: 'border-rose-500/40',
+    accentText: 'text-rose-300',
+    badgeBg: 'bg-rose-500/20 text-rose-300 border-rose-400/30',
+    icon: 'alert',
+    bullets: [
+      'F (Face): ใบหน้าชา ปากเบี้ยว มุมปากตกเวลายิ้มหรือพูด',
+      'A (Arm): แขนหรือขาข้างใดข้างหนึ่งอ่อนแรง ยกไม่ขึ้น หรือชาครึ่งซีก',
+      'S (Speech): พูดไม่ชัด ลิ้นแข็ง นึกคำพูดไม่ออก หรือฟังไม่เข้าใจทันทีทันใด',
+      'T (Time): รีบนำส่งโรงพยาบาลหรือโทรสายด่วน 1669 ทันที ภายใน 4 ชั่วโมง 30 นาที'
+    ],
+    highlightNote: 'สายด่วนฉุกเฉิน: พบอาการแม้เพียงข้อเดียว รีบแจ้งเจ้าหน้าที่หรือโทร 1669 ทันที'
+  },
+  {
+    id: 'medicine',
+    category: 'การใช้ยาอย่างปลอดภัย',
+    title: 'ใช้ยาอย่างสมเหตุผล เพื่อความปลอดภัยของทุกคน',
+    subtitle: 'แนวทางปฏิบัติง่ายๆ ก่อนและหลังรับยาที่ รพ.สต.',
+    accentBg: 'from-amber-950/80 via-slate-900 to-slate-950',
+    accentBorder: 'border-amber-500/40',
+    accentText: 'text-amber-300',
+    badgeBg: 'bg-amber-500/20 text-amber-300 border-amber-400/30',
+    icon: 'pill',
+    bullets: [
+      'แจ้งประวัติการแพ้ยา โรคประจำตัว และยาหรือสมุนไพรที่ทานอยู่ให้เจ้าหน้าที่ทราบทุกครั้ง',
+      'ยาปฏิชีวนะ (ยาฆ่าเชื้อ) ต้องรับประทานให้ครบตามกำหนด แม้จะรู้สึกหายดีแล้วก็ตาม',
+      'ไม่นำยาของผู้อื่นมารับประทาน และไม่แบ่งยาของตนเองให้ผู้อื่นทาน',
+      'เก็บยาให้พ้นแสงแดดและความชื้น ตรวจสอบวันหมดอายุก่อนรับประทานเสมอ'
+    ],
+    highlightNote: 'บริการปรึกษา: หากมีข้อสงสัยเรื่องวิธีใช้ยา สอบถามเภสัชกรหรือพยาบาลได้ทันที'
+  }
+];
 
 export default function TV() {
   const [activeQueue, setActiveQueue] = useState<Queue | null>(null);
@@ -14,12 +139,28 @@ export default function TV() {
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [isSpeaking, setIsSpeaking] = useState<boolean>(false);
   const [lastAnnouncedText, setLastAnnouncedText] = useState<string>('');
+  const [currentTipIndex, setCurrentTipIndex] = useState<number>(0);
+  const [isCarouselPaused, setIsCarouselPaused] = useState<boolean>(false);
+  const [nowTime, setNowTime] = useState<Date>(new Date());
 
   const lastSpokenKey = useRef<string | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const chimeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMutedRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    const clockTimer = setInterval(() => setNowTime(new Date()), 1000);
+    return () => clearInterval(clockTimer);
+  }, []);
+
+  useEffect(() => {
+    if (isCarouselPaused) return;
+    const slideTimer = setInterval(() => {
+      setCurrentTipIndex(prev => (prev + 1) % HEALTH_TIPS.length);
+    }, 10000);
+    return () => clearInterval(slideTimer);
+  }, [isCarouselPaused]);
 
   useEffect(() => {
     isMutedRef.current = isMuted;
@@ -340,15 +481,141 @@ export default function TV() {
 
       </div>
 
-      {/* Right Panel: Health Media */}
-      <div className="w-1/2 bg-black relative">
-        {/* Placeholder for YouTube / Health Media */}
-        <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-600">
-             <div className="w-32 h-32 rounded-full border-4 border-slate-800 border-t-teal-500 animate-spin mb-8" />
-             <p className="text-2xl font-bold uppercase tracking-widest text-slate-500">ช่องความรู้เพื่อสุขภาพ</p>
-             <p className="mt-2 text-slate-600 font-medium">วิดีโอให้ความรู้ด้านสุขภาพระหว่างรอรับบริการ</p>
-        </div>
-      </div>
+      {/* Right Panel: Health Media & Education Board */}
+      {(() => {
+        const activeTip = HEALTH_TIPS[currentTipIndex];
+        const renderTipIcon = (iconName: HealthTip['icon']) => {
+          const cls = `w-8 h-8 ${activeTip.accentText}`;
+          switch (iconName) {
+            case 'heart': return <HeartPulse className={cls} />;
+            case 'syringe': return <Syringe className={cls} />;
+            case 'droplets': return <Droplets className={cls} />;
+            case 'alert': return <ShieldAlert className={cls} />;
+            case 'pill': return <Pill className={cls} />;
+          }
+        };
+
+        return (
+          <div className={`w-1/2 bg-gradient-to-br ${activeTip.accentBg} flex flex-col p-6 lg:p-8 relative overflow-hidden transition-all duration-700`}>
+            {/* Top Bar: Health Channel Title + Live Clock */}
+            <div className="flex items-center justify-between gap-4 pb-4 border-b border-white/10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-teal-500/20 border border-teal-400/30 flex items-center justify-center text-teal-300">
+                  <BookOpen className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-lg lg:text-xl font-black tracking-tight text-white">ช่องความรู้เพื่อสุขภาพ รพ.สต.</h2>
+                  <p className="text-xs text-slate-400 font-medium">สื่อประชาสัมพันธ์และคำแนะนำดูแลสุขภาพระหว่างรอรับบริการ</p>
+                </div>
+              </div>
+
+              <div className="bg-slate-900/80 border border-white/10 px-4 py-2 rounded-2xl text-right shrink-0">
+                <div className="flex items-center justify-end gap-1.5 text-teal-300 font-black text-lg lg:text-xl leading-none">
+                  <Clock className="w-4 h-4" />
+                  <span>
+                    {nowTime.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-400 font-medium mt-1">
+                  {nowTime.toLocaleDateString('th-TH', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+                </div>
+              </div>
+            </div>
+
+            {/* Active Health Tip Card */}
+            <div className={`flex-1 my-5 bg-slate-900/65 backdrop-blur-md rounded-3xl border-2 ${activeTip.accentBorder} p-6 lg:p-8 flex flex-col justify-between shadow-2xl overflow-hidden`}>
+              <div>
+                <div className="flex items-start justify-between gap-4 mb-4">
+                  <span className={`inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full text-xs font-black border ${activeTip.badgeBg}`}>
+                    {activeTip.category}
+                  </span>
+                  <div className="w-14 h-14 rounded-2xl bg-slate-800/90 border border-white/10 flex items-center justify-center shrink-0 shadow-lg">
+                    {renderTipIcon(activeTip.icon)}
+                  </div>
+                </div>
+
+                <h3 className="text-2xl lg:text-3xl font-black text-white leading-snug tracking-tight mb-2">
+                  {activeTip.title}
+                </h3>
+                <p className={`text-sm lg:text-base font-semibold mb-6 ${activeTip.accentText}`}>
+                  {activeTip.subtitle}
+                </p>
+
+                <div className="space-y-3">
+                  {activeTip.bullets.map((item, idx) => (
+                    <div key={idx} className="flex items-start gap-3 bg-slate-800/60 border border-white/5 rounded-2xl px-4 py-3">
+                      <CheckCircle2 className={`w-5 h-5 shrink-0 mt-0.5 ${activeTip.accentText}`} />
+                      <p className="text-sm lg:text-[15px] text-slate-100 font-medium leading-relaxed">
+                        {item}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className={`mt-5 rounded-2xl px-4 py-3 border ${activeTip.badgeBg} text-xs lg:text-sm font-bold`}>
+                {activeTip.highlightNote}
+              </div>
+            </div>
+
+            {/* Slide Controls & Emergency Footer */}
+            <div className="flex flex-col gap-3 mt-auto">
+              <div className="flex items-center justify-between gap-4">
+                <div className="flex items-center gap-2">
+                  {HEALTH_TIPS.map((tip, idx) => (
+                    <button
+                      key={tip.id}
+                      onClick={() => setCurrentTipIndex(idx)}
+                      title={tip.title}
+                      className={`h-2.5 rounded-full transition-all cursor-pointer ${
+                        idx === currentTipIndex ? 'w-8 bg-teal-400' : 'w-2.5 bg-slate-700 hover:bg-slate-500'
+                      }`}
+                    />
+                  ))}
+                  <span className="text-xs font-bold text-slate-400 ml-2">
+                    {currentTipIndex + 1} / {HEALTH_TIPS.length}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setCurrentTipIndex(prev => (prev - 1 + HEALTH_TIPS.length) % HEALTH_TIPS.length)}
+                    className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/10 flex items-center justify-center text-slate-300 hover:text-white transition-colors cursor-pointer"
+                    title="เรื่องก่อนหน้า"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setIsCarouselPaused(prev => !prev)}
+                    className="px-3 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/10 flex items-center gap-1.5 text-xs font-bold text-slate-300 hover:text-white transition-colors cursor-pointer"
+                    title={isCarouselPaused ? 'เล่นอัตโนมัติต่อ' : 'หยุดชั่วคราว'}
+                  >
+                    {isCarouselPaused ? <Play className="w-3.5 h-3.5 text-teal-400" /> : <Pause className="w-3.5 h-3.5 text-amber-400" />}
+                    <span>{isCarouselPaused ? 'เล่นต่อ' : 'พักหน้าจอ'}</span>
+                  </button>
+                  <button
+                    onClick={() => setCurrentTipIndex(prev => (prev + 1) % HEALTH_TIPS.length)}
+                    className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/10 flex items-center justify-center text-slate-300 hover:text-white transition-colors cursor-pointer"
+                    title="เรื่องถัดไป"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-rose-950/50 border border-rose-500/30 rounded-2xl px-4 py-2.5 flex items-center justify-between gap-3">
+                <span className="text-xs text-rose-200 font-semibold truncate">
+                  หากมีอาการหน้ามืด เวียนศีรษะ หรือเจ็บแน่นหน้าอก กรุณาแจ้งเจ้าหน้าที่จุดคัดกรองทันที
+                </span>
+                <div className="flex items-center gap-1.5 bg-rose-500 text-white px-3 py-1 rounded-xl text-xs font-black shrink-0">
+                  <PhoneCall className="w-3.5 h-3.5" />
+                  <span>ฉุกเฉิน 1669</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );
