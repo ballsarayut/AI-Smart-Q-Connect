@@ -115,9 +115,442 @@ if (slotCount.count === 0) {
   insertSlot.run('14:30', '16:30', 15);
 }
 
+// Seed realistic analytics and queue data for demonstration
+function seedRealisticAnalyticsData(force: boolean = false) {
+  const existingCount = (db.prepare('SELECT count(*) as count FROM queues').get() as { count: number }).count;
+  if (!force && existingCount >= 10) {
+    return existingCount;
+  }
+
+  if (force) {
+    db.prepare('DELETE FROM queues').run();
+  }
+
+  const patientProfiles = [
+    { name: "นายสมชาย ใจดี", cid: "1100501234561", tel: "081-234-5678", uid: "U1001" },
+    { name: "นางกานดา มณีโชติ", cid: "1100501234562", tel: "089-876-5432", uid: "U1002" },
+    { name: "นายบุญมี ทองแท้", cid: "1100501234563", tel: "086-555-1234", uid: "U1003" },
+    { name: "นางสาวสุภาพร รัตนวิชัย", cid: "1100501234564", tel: "092-345-6789", uid: "U1004" },
+    { name: "นายประเสริฐ ยิ่งยวด", cid: "1100501234565", tel: "084-111-2233", uid: "U1005" },
+    { name: "นางวรรณา สดใส", cid: "1100501234566", tel: "085-999-8877", uid: "U1006" },
+    { name: "นายอำนาจ ศรีสุข", cid: "1100501234567", tel: "087-444-3322", uid: "U1007" },
+    { name: "นางมาลี พงษ์ไพบูลย์", cid: "1100501234568", tel: "091-888-7766", uid: "U1008" },
+    { name: "นายวินัย เจริญผล", cid: "1100501234569", tel: "083-222-1100", uid: "U1009" },
+    { name: "นางสาวนภาพร ดวงแก้ว", cid: "1100501234570", tel: "088-777-6655", uid: "U1010" },
+    { name: "นายชัชชัย เลิศวิริยะ", cid: "1100501234571", tel: "082-333-4455", uid: "U1011" },
+    { name: "นางรัตนา ประดิษฐ์สุข", cid: "1100501234572", tel: "090-666-5544", uid: "U1012" },
+    { name: "นายสมบูรณ์ มีสุข", cid: "1100501234573", tel: "081-999-0011", uid: "U1013" },
+    { name: "นายอนันต์ เจริญกิจ", cid: "1100501234574", tel: "089-444-1212", uid: "U1014" },
+    { name: "นางจันทร์เพ็ญ บุญรักษา", cid: "1100501234575", tel: "086-777-8989", uid: "U1015" },
+    { name: "นายธีรพล วรวิทย์", cid: "1100501234576", tel: "093-212-3456", uid: "U1016" },
+    { name: "นางพิมพา เกียรติอนันต์", cid: "1100501234577", tel: "084-555-6789", uid: "U1017" },
+    { name: "นายชัยวัฒน์ สุริยะ", cid: "1100501234578", tel: "087-123-9876", uid: "U1018" },
+    { name: "นางสาวสุดาพร ศรีมงคล", cid: "1100501234579", tel: "082-987-6543", uid: "U1019" },
+    { name: "นายสมจิต รุ่งอรุณ", cid: "1100501234580", tel: "085-321-7654", uid: "U1020" },
+    { name: "นางสมศรี จันทร์สว่าง", cid: "1100501234581", tel: "081-345-6789", uid: "U1021" },
+    { name: "นายทวีศักดิ์ ชัยภูมิ", cid: "1100501234582", tel: "089-765-4321", uid: "U1022" },
+    { name: "นางพรรณี วรรณรัตน์", cid: "1100501234583", tel: "086-234-5678", uid: "U1023" },
+    { name: "นายเกรียงไกร มั่นคง", cid: "1100501234584", tel: "092-876-5432", uid: "U1024" },
+    { name: "นางสาวอัญชลี พรประเสริฐ", cid: "1100501234585", tel: "084-333-2211", uid: "U1025" }
+  ];
+
+  const userIds: string[] = [];
+  const insertUser = db.prepare('INSERT OR REPLACE INTO users (id, citizen_id, full_name, phone, line_uid, role) VALUES (?, ?, ?, ?, ?, ?)');
+  patientProfiles.forEach(p => {
+    const existing = db.prepare('SELECT id FROM users WHERE citizen_id = ?').get(p.cid) as any;
+    const uid = existing?.id || randomUUID();
+    insertUser.run(uid, p.cid, p.name, p.tel, p.uid, 'patient');
+    userIds.push(uid);
+  });
+
+  const reviewsPool = [
+    { score: 5, comment: "ระบบจองผ่าน LINE สะดวกมากค่ะ มาถึงตรงเวลารอแค่ 10 นาทีก็ได้ตรวจแล้ว พยาบาลพูดจาไพเราะมาก" },
+    { score: 5, comment: "คุณหมอให้คำแนะนำละเอียด ใจดีและรับฟังอาการอย่างดีมากครับ" },
+    { score: 5, comment: "ระบบคิวเดินเร็วมาก มีการแจ้งเตือนใน LINE ก่อนถึงคิว ช่วยให้ไม่ต้องนั่งแออัดใน รพ.สต." },
+    { score: 5, comment: "รับยาโรคประจำตัวรวดเร็วทันใจ เจ้าหน้าที่เภสัชอธิบายวิธีทานยาเข้าใจง่ายครับ" },
+    { score: 5, comment: "แผลผ่าตัดทำแผลดี สะอาด มือเบามาก ไม่เจ็บเลยค่ะ" },
+    { score: 4, comment: "บริการดี สะดวก รวดเร็วดีมาก แต่ที่จอดรถช่วงเช้าค่อนข้างแน่น" },
+    { score: 5, comment: "ชอบที่มีเสียงเรียกคิวและหน้าจอทีวีชัดเจนมาก ไม่พลาดคิวแน่นอน" },
+    { score: 4, comment: "ระบบนัดล่วงหน้าทำงานได้ดีมาก ไม่ต้องตื่นมารอแต่เช้ามืดเหมือนเมื่อก่อนแล้ว" },
+    { score: 5, comment: "พยาบาลน่ารัก อารมณ์ดี บริการอบอุ่นเหมือนคนในครอบครัว" },
+    { score: 3, comment: "ช่วง 10 โมงคนเยอะนิดหน่อย แต่โดยรวมเจ้าหน้าที่บริการสุภาพและเต็มที่ครับ" },
+    { score: 5, comment: "ทันตกรรมมือเบามาก ขูดหินปูนสะอาด แนะนำดี ประทับใจมากค่ะ" },
+    { score: 4, comment: "สะดวกสบายมาก จองออนไลน์ผ่านมือถือง่ายมาก ผู้สูงอายุก็ใช้ได้" },
+    { score: 5, comment: "ไม่ต้องเสียเวลานั่งรอทั้งวันอีกต่อไป นวัตกรรมยอดเยี่ยมสำหรับชุมชนเลยครับ" },
+    { score: 4, comment: "เจ้าหน้าที่จุดคัดกรองแนะนำดี รวดเร็ว เป็นระเบียบเรียบร้อย" },
+    { score: 5, comment: "การแจ้งเตือนใกล้ถึงคิวล่วงหน้า 3 คิวดีมากๆ เดินไปซื้อน้ำรอได้สบายใจ" },
+    { score: 5, comment: "คุณหมอและพยาบาลตั้งใจดูแลคนไข้ทุกคนเป็นอย่างดี ชื่นชมครับ" },
+    { score: 4, comment: "ระบบคิวดิจิทัลช่วยลดความวุ่นวายได้เยอะมาก คนไข้รู้เวลาตัวเองชัดเจน" },
+    { score: 4, comment: "รอไม่นาน จัดการคิวได้เป็นระเบียบเรียบร้อย ประทับใจครับ" },
+    { score: 5, comment: "พยาบาลให้คำแนะนำการดูแลสุขภาพเบาหวานและความดันดีมาก" }
+  ];
+
+  const servicesConfig = [
+    { id: 'service_1', prefix: 'A', weight: 35 }, // รับยา 35%
+    { id: 'service_3', prefix: 'C', weight: 30 }, // พบแพทย์ 30%
+    { id: 'service_2', prefix: 'B', weight: 20 }, // ทำแผล 20%
+    { id: 'service_4', prefix: 'D', weight: 15 }  // ทันตกรรม 15%
+  ];
+
+  const insertQueue = db.prepare(`
+    INSERT INTO queues (
+      id, queue_number, patient_id, service_id, slot_id, booking_type, status,
+      created_at, called_at, completed_at, preferred_time, is_fast_track, is_campaign,
+      appointment_date, satisfaction_score, satisfaction_comment
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  let totalSeeded = 0;
+  const now = new Date();
+  const thaiNow = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+
+  // Seed across past 28 days up to today (dayOffset = 0)
+  for (let dayOffset = -28; dayOffset <= 0; dayOffset++) {
+    const targetDate = new Date(thaiNow.getTime() + dayOffset * 24 * 60 * 60 * 1000);
+    const dateStr = targetDate.toISOString().split('T')[0];
+    const isToday = dayOffset === 0;
+
+    const dayOfWeek = targetDate.getUTCDay();
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+    let countForDay = isWeekend ? 3 : (isToday ? 18 : (dayOffset >= -7 ? 11 : 5));
+
+    const counters: Record<string, number> = { A: 0, B: 0, C: 0, D: 0, F: 0 };
+    const hourPool = [8, 8, 9, 9, 9, 10, 10, 10, 11, 11, 13, 13, 14, 14, 15];
+
+    for (let i = 0; i < countForDay; i++) {
+      const uId = userIds[(totalSeeded + i) % userIds.length];
+      const rand = ((i * 17 + dayOffset * 13) % 100 + 100) % 100;
+      let srv = servicesConfig[0];
+      if (rand < 35) srv = servicesConfig[0];
+      else if (rand < 65) srv = servicesConfig[1];
+      else if (rand < 85) srv = servicesConfig[2];
+      else srv = servicesConfig[3];
+
+      const isFastTrack = srv.id === 'service_1' && i % 7 === 0;
+      const prefix = isFastTrack ? 'F' : srv.prefix;
+      counters[prefix] = (counters[prefix] || 0) + 1;
+      const qNum = `${prefix}${counters[prefix].toString().padStart(4, '0')}`;
+
+      const isOnline = (i + Math.abs(dayOffset)) % 2 === 0; // ~50% Online
+      const bookingType = isOnline ? 'Online' : 'Walk-in';
+
+      const baseHour = hourPool[i % hourPool.length];
+      const minute = ((i * 7 + 13) % 48) + 5;
+      const hourStr = baseHour.toString().padStart(2, '0');
+      const minStr = minute.toString().padStart(2, '0');
+      
+      const createdIso = `${dateStr}T${hourStr}:${minStr}:00.000`;
+      
+      // Realistic wait time between 11 - 18 minutes (avg 14)
+      const waitMinutes = 11 + ((i * 3 + dayOffset) % 8);
+      const calledDate = new Date(new Date(createdIso).getTime() + waitMinutes * 60 * 1000);
+      const calledIso = calledDate.toISOString().replace('Z', '');
+
+      // Service duration: 8 - 18 minutes
+      const serviceMinutes = 8 + ((i * 2) % 10);
+      const completedDate = new Date(calledDate.getTime() + serviceMinutes * 60 * 1000);
+      const completedIso = completedDate.toISOString().replace('Z', '');
+
+      let status = 'Completed';
+      let calledAt: string | null = calledIso;
+      let completedAt: string | null = completedIso;
+      let review = reviewsPool[(totalSeeded + i) % reviewsPool.length];
+      let score: number | null = review.score;
+      let comment: string | null = review.comment;
+
+      if (isToday) {
+        if (i >= countForDay - 3) {
+          // 3 waiting patients right now
+          status = 'Waiting';
+          calledAt = null;
+          completedAt = null;
+          score = null;
+          comment = null;
+        } else if (i === countForDay - 4) {
+          // 1 in calling
+          status = 'Calling';
+          completedAt = null;
+          score = null;
+          comment = null;
+        } else if (i === countForDay - 5) {
+          // 1 in progress
+          status = 'In-progress';
+          completedAt = null;
+          score = null;
+          comment = null;
+        }
+      } else {
+        // A couple of no-shows in history
+        if (i === 1 && dayOffset % 6 === 0) {
+          status = 'No-show';
+          calledAt = null;
+          completedAt = null;
+          score = null;
+          comment = null;
+        }
+      }
+
+      // Slot ID mapping based on time
+      let slotId = null;
+      if (isOnline) {
+        if (baseHour <= 10) slotId = 1;
+        else if (baseHour <= 12) slotId = 2;
+        else if (baseHour <= 14) slotId = 3;
+        else slotId = 4;
+      }
+
+      const qId = randomUUID();
+      insertQueue.run(
+        qId,
+        qNum,
+        uId,
+        srv.id,
+        slotId,
+        bookingType,
+        status,
+        createdIso,
+        calledAt,
+        completedAt,
+        isOnline ? `${hourStr}:${minStr}` : '',
+        isFastTrack ? 1 : 0,
+        0,
+        dateStr,
+        score,
+        comment
+      );
+      totalSeeded++;
+    }
+  }
+
+  return totalSeeded;
+}
+
+// Seed realistic Health Campaign queues (มหกรรมสุขภาพ / ฉีดวัคซีน)
+function seedCampaignQueues(force: boolean = false) {
+  const thaiNow = new Date(Date.now() + 7 * 60 * 60 * 1000);
+  const todayStr = thaiNow.toISOString().split('T')[0];
+
+  const existingCampaignCount = (
+    db.prepare("SELECT count(*) as count FROM queues WHERE service_id = 'service_campaign' AND (date(created_at) = ? OR appointment_date = ?)").get(todayStr, todayStr) as { count: number }
+  ).count;
+
+  if (!force && existingCampaignCount >= 5) {
+    return existingCampaignCount;
+  }
+
+  // Activate campaign service so it appears in Home, Patient, and Admin Campaign Mode
+  db.prepare("UPDATE services SET is_active = 1 WHERE id = 'service_campaign'").run();
+
+  if (force) {
+    db.prepare("DELETE FROM queues WHERE service_id = 'service_campaign' AND (date(created_at) = ? OR appointment_date = ?)").run(todayStr, todayStr);
+  }
+
+  const campaignPatients = [
+    { name: "นางสาวสุนิสา แก้วประเสริฐ", cid: "1100509900101", tel: "081-412-5501", uid: "UC2001" },
+    { name: "นายวิชัย ชัยวัฒนะ", cid: "1100509900102", tel: "089-412-5502", uid: "UC2002" },
+    { name: "นางสมหมาย จันทรา", cid: "1100509900103", tel: "086-412-5503", uid: "UC2003" },
+    { name: "นายประวิทย์ พูลทรัพย์", cid: "1100509900104", tel: "092-412-5504", uid: "UC2004" },
+    { name: "นางสาวกัญญา วงศ์สุวรรณ", cid: "1100509900105", tel: "084-412-5505", uid: "UC2005" },
+    { name: "นายธนากร มีเจริญ", cid: "1100509900106", tel: "085-412-5506", uid: "UC2006" },
+    { name: "นางดวงใจ สุขสวัสดิ์", cid: "1100509900107", tel: "087-412-5507", uid: "UC2007" },
+    { name: "นายกิตติพงษ์ ศรีวิไล", cid: "1100509900108", tel: "091-412-5508", uid: "UC2008" },
+    { name: "นางสาวพิมพ์ชนก รุ่งเรือง", cid: "1100509900109", tel: "083-412-5509", uid: "UC2009" },
+    { name: "นายสุรชัย ทองดี", cid: "1100509900110", tel: "088-412-5510", uid: "UC2010" },
+    { name: "นางละมัย บุญมี", cid: "1100509900111", tel: "082-412-5511", uid: "UC2011" },
+    { name: "นายเอกชัย วัฒนากูล", cid: "1100509900112", tel: "090-412-5512", uid: "UC2012" },
+    { name: "นางสาวอรุณี อินทร์แก้ว", cid: "1100509900113", tel: "081-412-5513", uid: "UC2013" },
+    { name: "นายสมพงษ์ แสงจันทร์", cid: "1100509900114", tel: "089-412-5514", uid: "UC2014" },
+    { name: "นางประไพ พิทักษ์ชน", cid: "1100509900115", tel: "086-412-5515", uid: "UC2015" },
+    { name: "นายณัฐพล ขวัญเมือง", cid: "1100509900116", tel: "093-412-5516", uid: "UC2016" },
+    { name: "นางสาวชุติมา นาคเสน", cid: "1100509900117", tel: "084-412-5517", uid: "UC2017" },
+    { name: "นายบรรจง ยิ้มแย้ม", cid: "1100509900118", tel: "087-412-5518", uid: "UC2018" },
+    { name: "นางสมปอง รักชาติ", cid: "1100509900119", tel: "082-412-5519", uid: "UC2019" },
+    { name: "นายวีระศักดิ์ ใจตรง", cid: "1100509900120", tel: "085-412-5520", uid: "UC2020" },
+    { name: "นางสาวจินตนา โพธิ์ทอง", cid: "1100509900121", tel: "081-412-5521", uid: "UC2021" },
+    { name: "นายสมาน พันธุ์ดี", cid: "1100509900122", tel: "089-412-5522", uid: "UC2022" },
+    { name: "นางทองสุข เหมือนใจ", cid: "1100509900123", tel: "086-412-5523", uid: "UC2023" },
+    { name: "นายชาญณรงค์ อ่อนน้อม", cid: "1100509900124", tel: "092-412-5524", uid: "UC2024" }
+  ];
+
+  const campaignReviews = [
+    { score: 5, comment: "ฉีดวัคซีนงานมหกรรมสุขภาพรวดเร็วมาก ระบบกระจายคิวดี ไม่แออัดเลยค่ะ" },
+    { score: 5, comment: "จัดงานมหกรรมสุขภาพได้เป็นระเบียบดีมาก จองผ่าน LINE มาถึงได้ฉีดเลย" },
+    { score: 5, comment: "เจ้าหน้าที่บริการดีมาก มีจุดคัดกรองและฉีดวัคซีนต่อเนื่อง รอไม่ถึง 10 นาที" },
+    { score: 4, comment: "คนมาร่วมงานเยอะแต่ระบบคิวช่วยจัดระเบียบได้ดีมากครับ" },
+    { score: 5, comment: "ประทับใจการฉีดวัคซีนไข้หวัดใหญ่ประจำปีมาก สะดวก ปลอดภัย" }
+  ];
+
+  const insertUser = db.prepare('INSERT OR REPLACE INTO users (id, citizen_id, full_name, phone, line_uid, role) VALUES (?, ?, ?, ?, ?, ?)');
+  const insertQueue = db.prepare(`
+    INSERT INTO queues (
+      id, queue_number, patient_id, service_id, slot_id, booking_type, status,
+      created_at, called_at, completed_at, preferred_time, is_fast_track, is_campaign,
+      appointment_date, satisfaction_score, satisfaction_comment
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const slotTimes = [
+    { slotId: 1, hour: 8, label: '08:30' },
+    { slotId: 2, hour: 10, label: '10:30' },
+    { slotId: 3, hour: 13, label: '13:00' },
+    { slotId: 4, hour: 14, label: '14:30' }
+  ];
+
+  let seededCount = 0;
+  const totalToCreate = campaignPatients.length; // 24 campaign queues (M0001 - M0024)
+
+  for (let i = 0; i < totalToCreate; i++) {
+    const p = campaignPatients[i];
+    const existingUser = db.prepare('SELECT id FROM users WHERE citizen_id = ?').get(p.cid) as any;
+    const userId = existingUser?.id || randomUUID();
+    insertUser.run(userId, p.cid, p.name, p.tel, p.uid, 'patient');
+
+    const qNum = `M${(i + 1).toString().padStart(4, '0')}`;
+    const slotInfo = slotTimes[i % slotTimes.length]; // Automatic load balancing across slots
+    const isOnline = i % 3 !== 2; // ~67% Online booking for mass campaign
+    const bookingType = isOnline ? 'Online' : 'Walk-in';
+    const minute = ((i * 4 + 3) % 50).toString().padStart(2, '0');
+    const createdIso = `${todayStr}T${slotInfo.hour.toString().padStart(2, '0')}:${minute}:00.000`;
+
+    let status = 'Completed';
+    let calledAt: string | null = null;
+    let completedAt: string | null = null;
+    let score: number | null = null;
+    let comment: string | null = null;
+
+    if (i < 15) {
+      status = 'Completed';
+      const calledDate = new Date(new Date(createdIso).getTime() + (6 + (i % 6)) * 60 * 1000);
+      const completedDate = new Date(calledDate.getTime() + (4 + (i % 4)) * 60 * 1000);
+      calledAt = calledDate.toISOString().replace('Z', '');
+      completedAt = completedDate.toISOString().replace('Z', '');
+      const rev = campaignReviews[i % campaignReviews.length];
+      score = rev.score;
+      comment = rev.comment;
+    } else if (i === 15) {
+      status = 'Calling';
+      calledAt = getThailandTimeStr();
+    } else if (i === 16) {
+      status = 'In-progress';
+      calledAt = new Date(Date.now() + 7 * 60 * 60 * 1000 - 3 * 60 * 1000).toISOString().replace('Z', '');
+    } else {
+      status = 'Waiting';
+    }
+
+    insertQueue.run(
+      randomUUID(),
+      qNum,
+      userId,
+      'service_campaign',
+      slotInfo.slotId,
+      bookingType,
+      status,
+      createdIso,
+      calledAt,
+      completedAt,
+      isOnline ? slotInfo.label : '',
+      i % 8 === 0 ? 1 : 0,
+      1,
+      todayStr,
+      score,
+      comment
+    );
+    seededCount++;
+  }
+
+  return seededCount;
+}
+
+// Run initial seed on server startup if database is empty
+try {
+  const seeded = seedRealisticAnalyticsData(false);
+  const campaignSeeded = seedCampaignQueues(false);
+  console.log(`[Database] Seeded ${seeded} realistic queues & ${campaignSeeded} health campaign queues.`);
+} catch (e) {
+  console.error('[Database] Seeding error:', e);
+}
+
+// In-memory cache for Thai TTS MP3 audio
+const ttsCache = new Map<string, Buffer>();
+
 // API Routes
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
+});
+
+app.get("/api/tts", async (req, res) => {
+  try {
+    const rawText = String(req.query.text || '').trim();
+    if (!rawText) {
+      return res.status(400).json({ error: "Missing text parameter" });
+    }
+    const text = rawText.slice(0, 220);
+
+    const cached = ttsCache.get(text);
+    if (cached) {
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      return res.send(cached);
+    }
+
+    const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=th&client=tw-ob&q=${encodeURIComponent(text)}`;
+    const response = await fetch(ttsUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://translate.google.com/'
+      }
+    });
+
+    if (!response.ok) {
+      return res.status(response.status).json({ error: "Failed to generate TTS audio" });
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const audioBuffer = Buffer.from(arrayBuffer);
+
+    if (ttsCache.size >= 150) {
+      const oldestKey = ttsCache.keys().next().value;
+      if (oldestKey) ttsCache.delete(oldestKey);
+    }
+    ttsCache.set(text, audioBuffer);
+
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.send(audioBuffer);
+  } catch (err: any) {
+    console.error('[TTS Error]:', err);
+    return res.status(500).json({ error: err.message || "TTS Error" });
+  }
+});
+
+app.post("/api/admin/seed-demo-data", (req, res) => {
+  try {
+    const count = seedRealisticAnalyticsData(true);
+    const campaignCount = seedCampaignQueues(true);
+    const io = app.get('io');
+    if (io) {
+      io.emit('queue_updated');
+      io.emit('services_updated', db.prepare('SELECT * FROM services').all());
+    }
+    res.json({ success: true, count: count + campaignCount, message: `จำลองข้อมูลสถิติ ${count + campaignCount} รายการเรียบร้อยแล้ว` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to seed demo data" });
+  }
+});
+
+app.post("/api/admin/seed-campaign-data", (req, res) => {
+  try {
+    const count = seedCampaignQueues(true);
+    const updatedServices = db.prepare('SELECT * FROM services').all();
+    const io = app.get('io');
+    if (io) {
+      io.emit('services_updated', updatedServices);
+      io.emit('queue_updated');
+    }
+    res.json({ success: true, count, message: `จำลองคิวหมวดมหกรรมสุขภาพ ${count} คิว (M0001 - M${count.toString().padStart(4, '0')}) เรียบร้อยแล้ว` });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Failed to seed campaign data" });
+  }
 });
 
 app.get("/api/services", (req, res) => {

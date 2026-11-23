@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import { Queue, Service } from '../types';
-import { Play, SkipForward, CheckCircle, CheckCircle2, AlertCircle, UserPlus, Clock, Search, ArrowLeft, Layers as ServiceIcon, Zap, Settings, MessageSquare } from 'lucide-react';
+import { Play, SkipForward, CheckCircle, CheckCircle2, AlertCircle, UserPlus, Clock, Search, ArrowLeft, Layers as ServiceIcon, Zap, Settings, MessageSquare, Sparkles } from 'lucide-react';
 import { format } from 'date-fns';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
@@ -16,6 +16,7 @@ export default function Admin() {
 
   const [queues, setQueues] = useState<Queue[]>([]);
   const [services, setServices] = useState<Service[]>([]);
+  const [queueFilter, setQueueFilter] = useState<'all' | 'campaign' | 'normal'>(isCampaignMode ? 'campaign' : 'all');
   
   // Walk-in form state
   const [showWalkin, setShowWalkin] = useState(false);
@@ -244,6 +245,42 @@ export default function Admin() {
     }
   };
 
+  const [isSeedingDemo, setIsSeedingDemo] = useState(false);
+  const [isSeedingCampaign, setIsSeedingCampaign] = useState(false);
+  const handleSeedDemoData = async () => {
+    setIsSeedingDemo(true);
+    try {
+      const res = await fetch('/api/admin/seed-demo-data', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(`จำลองข้อมูลสถิติ ${data.count} รายการสำเร็จ!`);
+        fetchQueues();
+      }
+    } catch (e) {
+      toast.error('ไม่สามารถจำลองข้อมูลได้');
+    } finally {
+      setIsSeedingDemo(false);
+    }
+  };
+
+  const handleSeedCampaignData = async () => {
+    setIsSeedingCampaign(true);
+    try {
+      const res = await fetch('/api/admin/seed-campaign-data', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        toast.success(data.message || `จำลองคิวหมวดมหกรรมสุขภาพ ${data.count} คิวสำเร็จ!`);
+        fetchQueues();
+        fetchServices();
+        setQueueFilter('campaign');
+      }
+    } catch (e) {
+      toast.error('ไม่สามารถจำลองคิวมหกรรมสุขภาพได้');
+    } finally {
+      setIsSeedingCampaign(false);
+    }
+  };
+
   const submitWalkin = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -424,6 +461,15 @@ export default function Admin() {
                 )}
               </div>
               <div className="flex flex-col sm:flex-row items-end sm:items-center gap-3 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleSeedCampaignData}
+                  disabled={isSeedingCampaign}
+                  className="px-4 py-2 rounded-xl font-bold text-xs shadow-md transition-all uppercase tracking-wider bg-amber-400 hover:bg-amber-300 text-slate-900 flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Sparkles className="w-4 h-4" />
+                  {isSeedingCampaign ? 'กำลังจำลอง...' : 'จำลองคิวมหกรรม (24 คิว)'}
+                </button>
                 <button
                   onClick={async () => {
                      await fetch('/api/admin/services/service_campaign/toggle', { method: 'POST' });
@@ -758,6 +804,27 @@ export default function Admin() {
                   {slots.length === 0 && <p className="text-center font-bold text-slate-300 py-8">ยังไม่มีรอบการจองนัดหมายที่กำหนด</p>}
                 </div>
               </div>
+
+              {/* Simulation section */}
+              <div className="mt-8 pt-8 border-t border-slate-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-slate-50 p-6 rounded-2xl">
+                <div>
+                  <h4 className="font-black text-slate-900 text-sm flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-teal-600" /> ข้อมูลสถิติและรายงานจำลอง (Demo Data)
+                  </h4>
+                  <p className="text-xs text-slate-400 font-medium mt-1">
+                    สร้างข้อมูลคิวจำลองย้อนหลัง 30 วันและของวันนี้ เพื่อให้กราฟ สถิติ และรีวิวความพึงพอใจในหน้ารายงานสมบูรณ์
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleSeedDemoData}
+                  disabled={isSeedingDemo}
+                  className="bg-teal-600 hover:bg-teal-700 text-white font-black text-xs uppercase tracking-wider px-5 py-3 rounded-xl transition-all shadow-md shadow-teal-600/20 flex items-center gap-2 shrink-0 disabled:opacity-50"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-200" />
+                  {isSeedingDemo ? 'กำลังจำลอง...' : 'จำลองข้อมูลสถิติใหม่'}
+                </button>
+              </div>
             </motion.form>
           )}
 
@@ -791,16 +858,62 @@ export default function Admin() {
             </motion.div>
           )}
 
+          {/* Queue Category Filter Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-4 mb-2">
+            <div className="flex items-center gap-2 bg-white p-1.5 rounded-2xl border border-slate-200 shadow-sm">
+              <button
+                type="button"
+                onClick={() => setQueueFilter('all')}
+                className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${queueFilter === 'all' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}
+              >
+                ทั้งหมด ({queues.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setQueueFilter('campaign')}
+                className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${queueFilter === 'campaign' ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-500 hover:text-teal-600'}`}
+              >
+                มหกรรมสุขภาพ ({queues.filter(q => q.service_id === 'service_campaign' || q.service_name.includes('มหกรรม')).length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setQueueFilter('normal')}
+                className={`px-4 py-2 rounded-xl text-xs font-black transition-all ${queueFilter === 'normal' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-900'}`}
+              >
+                บริการปกติ ({queues.filter(q => q.service_id !== 'service_campaign' && !q.service_name.includes('มหกรรม')).length})
+              </button>
+            </div>
+            {!isCampaignMode && (
+              <button
+                type="button"
+                onClick={handleSeedCampaignData}
+                disabled={isSeedingCampaign}
+                className="px-4 py-2.5 bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 rounded-xl text-xs font-black flex items-center gap-2 transition-all disabled:opacity-50"
+              >
+                <Sparkles className="w-4 h-4" />
+                {isSeedingCampaign ? 'กำลังจำลอง...' : 'จำลองคิวมหกรรมสุขภาพ'}
+              </button>
+            )}
+          </div>
+
           {/* Queues List */}
+          {(() => {
+            const filteredQueues = queues.filter(q => {
+              const isCamp = q.service_id === 'service_campaign' || q.service_name.includes('มหกรรม');
+              if (queueFilter === 'campaign') return isCamp;
+              if (queueFilter === 'normal') return !isCamp;
+              return true;
+            });
+            return (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
-            {queues.length === 0 ? (
+            {filteredQueues.length === 0 ? (
               <div className="col-span-full py-20 text-center">
                 <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-6">
                   <Search className="w-8 h-8 text-slate-300" />
                 </div>
                 <p className="text-slate-400 font-bold text-lg">ยังไม่มีรายการคิวรอรับบริการ</p>
               </div>
-            ) : queues.map((q) => (
+            ) : filteredQueues.map((q) => (
               <div key={q.id} className={`bg-white rounded-[40px] border border-slate-100 overflow-hidden shadow-xl shadow-slate-200/40 flex flex-col transition-all duration-500 ${q.status === 'Calling' ? 'ring-4 ring-teal-500/10 scale-105 z-10' : ''}`}>
                 <div className={`px-6 py-4 border-b border-slate-50 flex justify-between items-center ${q.booking_type === 'Online' ? 'bg-teal-50/30' : 'bg-slate-50/50'}`}>
                   <div className="flex items-center gap-2">
@@ -861,6 +974,8 @@ export default function Admin() {
               </div>
             ))}
           </div>
+            );
+          })()}
 
         </main>
         <LineSimulator />
