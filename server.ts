@@ -684,7 +684,7 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
   let lineMessages: any[] = [];
   
   if (action === 'Booked') {
-    text = `📌 จองคิวสำเร็จ! (รพ.สต.อัจฉริยะ)
+    text = `📌 จองคิวสำเร็จ! (AI Smart Q Connect • รพ.สต.อัจฉริยะ)
 • หมายเลขคิว: ${queue.queue_number}
 • ผู้ป่วย: ${queue.full_name}
 • บริการ: ${queue.service_name} ${queue.is_fast_track ? '(รับยาต่อเนื่อง Fast-Track)' : ''}
@@ -701,11 +701,11 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
        text += `\n👉 สามารถตรวจสอบสถานะคิวของคุณได้ทางสมาร์ทโฟน\n👉 กรุณามาถึงก่อนเวลาที่จะถึงคิวอย่างน้อย 30 นาที`;
     }
   } else if (action === 'Calling') {
-    text = `📣 ประกาศเรียกคิวเลขนมัสการ! (รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n• ชื่อคนไข้: ${queue.full_name}\n👉 กรุณาเข้าพบเจ้าหน้าที่ ณ จุดคัดกรองหรือห้องตรวจทันทีค่ะ`;
+    text = `📣 ประกาศเรียกคิวรับบริการ! (AI Smart Q Connect • รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n• ชื่อคนไข้: ${queue.full_name}\n👉 กรุณาเข้าพบเจ้าหน้าที่ ณ จุดคัดกรองหรือห้องตรวจทันทีค่ะ`;
   } else if (action === 'Completed') {
     const liffRecord = db.prepare("SELECT value FROM system_settings WHERE key = 'line_liff_id'").get() as any;
     const liffId = liffRecord?.value;
-    text = `✅ บริการเสร็จสิ้นเรียบร้อย (รพ.สต.อัจฉริยะ)
+    text = `✅ บริการเสร็จสิ้นเรียบร้อย (AI Smart Q Connect • รพ.สต.อัจฉริยะ)
 • หมายเลขคิว: ${queue.queue_number}
 • บริการ: ${queue.service_name}
 👉 รพ.สต. ขอขอบพระคุณที่เข้ารับบริการ ขอให้ท่านมีสุขภาพแข็งแรง ปราศจากโรคภัยค่ะ
@@ -745,13 +745,13 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
       ];
     }
   } else if (action === 'Skipped') {
-    text = `⚠️ แจ้งเตือนการข้ามคิว (รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n👉 เนื่องจากพยาบาลเรียกคิวแล้วไม่พบท่าน คิวจึงถูกข้ามชั่วคราว กรุณาติดต่อเคาน์เตอร์พยาบาลค่ะ`;
+    text = `⚠️ แจ้งเตือนการข้ามคิว (AI Smart Q Connect • รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n👉 เนื่องจากพยาบาลเรียกคิวแล้วไม่พบท่าน คิวจึงถูกข้ามชั่วคราว กรุณาติดต่อเคาน์เตอร์พยาบาลค่ะ`;
   } else if (action === 'No-show') {
-    text = `🚨 แจ้งเตือน: คุณขาดนัด${queue.service_name} (ที่รพ.สต.)\n• หมายเลขคิว: ${queue.queue_number}\n👉 ท่านไม่ได้มาแสดงตัวตามนัดหมายในวันนี้ กรุณาติดต่อสายด่วน รพ.สต. เพื่อนัดหมายใหม่ หรือรับยาป้องกันการขาดยาค่ะ`;
+    text = `🚨 แจ้งเตือน: คุณขาดนัด${queue.service_name} (AI Smart Q Connect • รพ.สต.)\n• หมายเลขคิว: ${queue.queue_number}\n👉 ท่านไม่ได้มาแสดงตัวตามนัดหมายในวันนี้ กรุณาติดต่อสายด่วน รพ.สต. เพื่อนัดหมายใหม่ หรือรับยาป้องกันการขาดยาค่ะ`;
   } else if (action === 'Approaching') {
-    text = `⏳ ใกล้ถึงคิวของท่านแล้ว! (รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n👉 อีกประมาณ ${queue.people_in_front || 0} คิว (รอประมาณ ${queue.estimated_wait_time || 0} นาที) จะถึงคิวของท่าน กรุณาเตรียมตัวบริเวณจุดรอพักค่ะ`;
+    text = `⏳ ใกล้ถึงคิวของท่านแล้ว! (AI Smart Q Connect • รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n👉 อีกประมาณ ${queue.people_in_front || 0} คิว (รอประมาณ ${queue.estimated_wait_time || 0} นาที) จะถึงคิวของท่าน กรุณาเตรียมตัวบริเวณจุดรอพักค่ะ`;
   } else if (action === 'Approaching_1hr') {
-    text = `⏰ แจ้งเตือนล่วงหน้า 1 ชั่วโมง (รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n• เวลาที่นัดหมาย: ${queue.preferred_time}\n👉 กรุณามาถึงก่อนเวลาที่จะถึงคิวอย่างน้อย 30 นาที เพื่อเตรียมตัวคัดกรองเบื้องต้นค่ะ`;
+    text = `⏰ แจ้งเตือนล่วงหน้า 1 ชั่วโมง (AI Smart Q Connect • รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n• เวลาที่นัดหมาย: ${queue.preferred_time}\n👉 กรุณามาถึงก่อนเวลาที่จะถึงคิวอย่างน้อย 30 นาที เพื่อเตรียมตัวคัดกรองเบื้องต้นค่ะ`;
   }
 
 
@@ -1021,13 +1021,31 @@ app.patch("/api/queues/:id/status", (req, res) => {
 
 app.post("/api/queues/:id/rate", (req, res) => {
   const { id } = req.params;
-  const { score, comment } = req.body;
-  if (typeof score !== 'number' || score < 1 || score > 5) {
-    return res.status(400).json({ error: "Invalid score" });
+  const rawScore = Number(req.body?.score);
+  const comment = req.body?.comment;
+
+  if (!Number.isInteger(rawScore) || rawScore < 1 || rawScore > 5) {
+    return res.status(400).json({ error: "กรุณาระบุคะแนนประเมินตั้งแต่ 1 ถึง 5 ดาว" });
   }
-  db.prepare('UPDATE queues SET satisfaction_score = ?, satisfaction_comment = ? WHERE id = ?').run(score, comment || null, id);
+
+  const existing = db.prepare('SELECT id, completed_at, satisfaction_comment FROM queues WHERE id = ?').get(id) as any;
+  if (!existing) {
+    return res.status(404).json({ error: "ไม่พบรายการคิวนี้ในระบบ" });
+  }
+
+  const cleanComment = typeof comment === 'string'
+    ? (comment.trim() || null)
+    : existing.satisfaction_comment;
+  const completedAt = existing.completed_at || getThailandTimeStr();
+
+  db.prepare('UPDATE queues SET satisfaction_score = ?, satisfaction_comment = ?, completed_at = ? WHERE id = ?')
+    .run(rawScore, cleanComment, completedAt, id);
+
   const updatedQueue = getQueueDetails(id);
-  app.get('io').emit('queue_updated', updatedQueue);
+  const io = app.get('io');
+  if (io && updatedQueue) {
+    io.emit('queue_updated', updatedQueue);
+  }
   res.json(updatedQueue);
 });
 
@@ -1100,7 +1118,7 @@ app.post("/api/settings/test-line", async (req, res) => {
       },
       body: JSON.stringify({
         to: uid,
-        messages: [{ type: 'text', text: '🔔 ทดสอบระบบแจ้งเตือนจาก Q-Flow!\nหากคุณได้รับข้อความนี้ แสดงว่าการเชื่อมต่อ LINE Messaging API สำเร็จและพร้อมใช้งานแล้วค่ะ' }]
+        messages: [{ type: 'text', text: '🔔 ทดสอบระบบแจ้งเตือนจาก AI Smart Q Connect!\nหากคุณได้รับข้อความนี้ แสดงว่าการเชื่อมต่อ LINE Messaging API สำเร็จและพร้อมใช้งานแล้วค่ะ' }]
       })
     });
     
@@ -1279,12 +1297,12 @@ app.get("/api/analytics", (req, res) => {
   const satisfactionPercentage = avgSatisfacton > 0 ? Math.round((avgSatisfacton / 5) * 100) : 0;
 
   const reviews = db.prepare(`
-    SELECT q.id, q.queue_number, q.satisfaction_score, q.satisfaction_comment, q.completed_at, u.full_name, s.service_name, s.color_code
+    SELECT q.id, q.queue_number, q.satisfaction_score, q.satisfaction_comment, COALESCE(q.completed_at, q.created_at) as completed_at, u.full_name, s.service_name, s.color_code
     FROM queues q
     JOIN users u ON q.patient_id = u.id
     JOIN services s ON q.service_id = s.id
     WHERE q.satisfaction_score IS NOT NULL AND date(q.created_at) >= ? AND date(q.created_at) <= ?
-    ORDER BY q.completed_at DESC
+    ORDER BY COALESCE(q.completed_at, q.created_at) DESC
   `).all(startDate, endDate) as any[];
 
   const fallbackComments: Record<number, string[]> = {
@@ -1457,7 +1475,9 @@ function getQueueDetails(id: string) {
     WHERE q.id = ?
   `).get(id) as any;
 
-  if (queue && queue.status === 'Waiting') {
+  if (!queue) return null;
+
+  if (queue.status === 'Waiting') {
     // Calculate people in front (bump down waiting if fast track)
     const inFront = db.prepare(`
       SELECT count(*) as count 

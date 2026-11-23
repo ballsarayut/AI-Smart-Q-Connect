@@ -107,7 +107,7 @@ export default function Kiosk() {
       {/* Kiosk Header */}
       <div className="p-8 flex justify-between items-center bg-white border-b border-slate-100">
         <div>
-          <h1 className="text-3xl font-black tracking-tighter text-slate-900">Q-FLOW <span className="text-teal-600">คีออส</span></h1>
+          <h1 className="text-3xl font-black tracking-tighter text-slate-900">AI Smart <span className="text-teal-600">Q Connect</span> คีออส</h1>
           <p className="text-slate-400 font-bold text-sm uppercase tracking-widest mt-1">บริการรับคิวด้วยตนเอง (Self-Service)</p>
         </div>
         <div className="flex gap-4">
@@ -204,7 +204,7 @@ export default function Kiosk() {
 
       {/* Footer Info */}
       <footer className="p-8 text-center text-slate-300 font-bold text-[10px] uppercase tracking-[0.3em]">
-        ระบบความปลอดภัยทำงานปกติ • พัฒนาโดย Q-Flow
+        ระบบความปลอดภัยทำงานปกติ • พัฒนาโดย AI Smart Q Connect
       </footer>
 
       {/* Settings Modal */}

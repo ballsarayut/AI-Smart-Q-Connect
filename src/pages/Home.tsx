@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Smartphone, MonitorPlay, ShieldCheck, Menu, X, Heart, Users, Leaf, Bell, Search, Clock } from 'lucide-react';
+import { Smartphone, MonitorPlay, ShieldCheck, Menu, X, Heart, Users, Leaf, Bell, Search, Clock, Star, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { io } from 'socket.io-client';
+import toast from 'react-hot-toast';
 import { Queue } from '../types';
 
 const socket = io();
@@ -15,6 +16,10 @@ export default function Home() {
   const [searchResult, setSearchResult] = useState<Queue | null>(null);
   const [searchError, setSearchError] = useState('');
   const [isSearching, setIsSearching] = useState(false);
+  const [rateScore, setRateScore] = useState(0);
+  const [rateHover, setRateHover] = useState(0);
+  const [rateComment, setRateComment] = useState('');
+  const [isSubmittingRate, setIsSubmittingRate] = useState(false);
   const [isCampaignActive, setIsCampaignActive] = useState(false);
   const [campaignTitle, setCampaignTitle] = useState('มหกรรมสุขภาพ / ฉีดวัคซีน');
   const [campaignDesc, setCampaignDesc] = useState('เพื่อความสะดวกรวดเร็วและลดความแออัด ท่านสามารถจองคิวเข้ารับบริการล่วงหน้าได้สูงสุด 10 วัน โปรดเลือกวันและรอบเวลาที่คุณสะดวก');
@@ -26,6 +31,9 @@ export default function Home() {
     setIsSearching(true);
     setSearchError('');
     setSearchResult(null);
+    setRateScore(0);
+    setRateHover(0);
+    setRateComment('');
     
     try {
       const res = await fetch(`/api/queues/number/${encodeURIComponent(searchQuery.trim())}`);
@@ -33,6 +41,12 @@ export default function Home() {
       
       if (res.ok) {
         setSearchResult(data);
+        if (data.satisfaction_score) {
+          setRateScore(data.satisfaction_score);
+        }
+        if (data.satisfaction_comment) {
+          setRateComment(data.satisfaction_comment);
+        }
       } else {
         setSearchError(data.error || 'ไม่พบข้อมูลคิว');
       }
@@ -40,6 +54,32 @@ export default function Home() {
       setSearchError('เกิดข้อผิดพลาดในการค้นหา');
     } finally {
       setIsSearching(false);
+    }
+  };
+
+  const handleSearchRate = async () => {
+    if (!searchResult || rateScore < 1 || rateScore > 5) {
+      toast.error('กรุณาเลือกคะแนนความพึงพอใจ 1-5 ดาว');
+      return;
+    }
+    setIsSubmittingRate(true);
+    try {
+      const res = await fetch(`/api/queues/${searchResult.id}/rate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ score: rateScore, comment: rateComment })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'ไม่สามารถบันทึกผลประเมินได้');
+      } else {
+        setSearchResult(data);
+        toast.success('ขอบคุณสำหรับการประเมินความพึงพอใจ!');
+      }
+    } catch {
+      toast.error('เกิดข้อผิดพลาดในการส่งผลประเมิน');
+    } finally {
+      setIsSubmittingRate(false);
     }
   };
 
@@ -380,6 +420,78 @@ export default function Home() {
                     </div>
                     <p className="text-[10px] font-bold text-slate-400 tracking-widest uppercase mt-1">เวลาโดยประมาณ</p>
                   </div>
+                </div>
+              )}
+
+              {searchResult.status === 'Completed' && (
+                <div className="mt-4 pt-5 border-t border-teal-200/70">
+                  {!searchResult.satisfaction_score ? (
+                    <div className="bg-white rounded-2xl p-5 border border-teal-100 text-center">
+                      <p className="text-sm font-black text-slate-800 mb-1">🌟 ประเมินความพึงพอใจการรับบริการ</p>
+                      <p className="text-xs text-slate-500 mb-3">{searchResult.service_name} • {searchResult.full_name}</p>
+                      <div className="flex justify-center gap-2 mb-3">
+                        {[1, 2, 3, 4, 5].map(star => (
+                          <button
+                            key={star}
+                            type="button"
+                            disabled={isSubmittingRate}
+                            onMouseEnter={() => setRateHover(star)}
+                            onMouseLeave={() => setRateHover(0)}
+                            onClick={() => setRateScore(star)}
+                            className="transition-transform hover:scale-110 focus:outline-none cursor-pointer"
+                          >
+                            <Star
+                              className={`w-9 h-9 ${star <= (rateHover || rateScore) ? 'text-amber-400 fill-amber-400' : 'text-slate-200'} transition-colors`}
+                            />
+                          </button>
+                        ))}
+                      </div>
+
+                      {rateScore > 0 ? (
+                        <div className="space-y-3 mt-3">
+                          <textarea
+                            value={rateComment}
+                            onChange={e => setRateComment(e.target.value)}
+                            placeholder="พิมพ์ข้อเสนอแนะเพิ่มเติม (ไม่บังคับ)..."
+                            rows={2}
+                            maxLength={200}
+                            className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium outline-none focus:bg-white focus:border-teal-500 resize-none"
+                          />
+                          <button
+                            type="button"
+                            disabled={isSubmittingRate}
+                            onClick={handleSearchRate}
+                            className="w-full bg-teal-600 hover:bg-teal-700 text-white font-black py-3 rounded-xl text-xs uppercase tracking-wider transition-all disabled:opacity-50 cursor-pointer shadow-sm"
+                          >
+                            {isSubmittingRate ? 'กำลังบันทึก...' : 'ส่งแบบประเมิน'}
+                          </button>
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-slate-400 font-medium">แตะที่รูปดาวเพื่อให้คะแนนความพึงพอใจ</p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="bg-white rounded-2xl p-4 border border-emerald-200 flex flex-col items-center text-center">
+                      <div className="inline-flex items-center gap-1.5 text-emerald-600 font-black text-xs mb-2">
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>ขอบคุณสำหรับการประเมินความพึงพอใจ</span>
+                      </div>
+                      <div className="flex items-center gap-1 mb-1">
+                        {[1, 2, 3, 4, 5].map(star => (
+                          <Star
+                            key={star}
+                            className={`w-5 h-5 ${star <= (searchResult.satisfaction_score || 0) ? 'text-amber-400 fill-amber-400' : 'text-slate-200'}`}
+                          />
+                        ))}
+                        <span className="ml-1.5 text-xs font-black text-slate-700">({searchResult.satisfaction_score}/5)</span>
+                      </div>
+                      {searchResult.satisfaction_comment && (
+                        <p className="text-xs text-slate-600 italic mt-1 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
+                          "{searchResult.satisfaction_comment}"
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </motion.div>

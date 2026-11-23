@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
-import { MessageSquare, X, Send, BellRing, Settings, Check, HelpCircle, Shield, AlertCircle } from 'lucide-react';
+import { MessageSquare, X, Send, BellRing, Settings, Check, HelpCircle, Shield, Star, CheckCircle2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 const socket = io();
 
@@ -8,6 +9,10 @@ export default function LineSimulator() {
   const [isOpen, setIsOpen] = useState(false);
   const [messages, setMessages] = useState<any[]>([]);
   const [hasNew, setHasNew] = useState(false);
+  const [ratedQueues, setRatedQueues] = useState<Record<string, { score: number; comment?: string | null }>>({});
+  const [draftScores, setDraftScores] = useState<Record<string, number>>({});
+  const [draftComments, setDraftComments] = useState<Record<string, string>>({});
+  const [submittingId, setSubmittingId] = useState<string | null>(null);
   
   // LINE Messaging API States
   const [channelAccessToken, setChannelAccessToken] = useState('');
@@ -52,6 +57,22 @@ export default function LineSimulator() {
       })
       .catch((err) => console.log('Error loading line logs', err));
 
+    // Load current queue ratings so already-rated completed bubbles reflect accurate state
+    fetch('/api/queues')
+      .then((res) => res.json())
+      .then((queues) => {
+        if (Array.isArray(queues)) {
+          const map: Record<string, { score: number; comment?: string | null }> = {};
+          queues.forEach((q: any) => {
+            if (q.satisfaction_score) {
+              map[q.id] = { score: q.satisfaction_score, comment: q.satisfaction_comment };
+            }
+          });
+          setRatedQueues(map);
+        }
+      })
+      .catch(() => {});
+
     // 2. Load system settings
     fetch('/api/settings')
       .then((res) => res.json())
@@ -69,12 +90,56 @@ export default function LineSimulator() {
       playChime();
     };
 
+    const handleQueueUpdated = (updated: any) => {
+      if (updated?.id && updated?.satisfaction_score) {
+        setRatedQueues((prev) => ({
+          ...prev,
+          [updated.id]: { score: updated.satisfaction_score, comment: updated.satisfaction_comment }
+        }));
+      }
+    };
+
     socket.on('line_notification', handleLineNotification);
+    socket.on('queue_updated', handleQueueUpdated);
 
     return () => {
       socket.off('line_notification', handleLineNotification);
+      socket.off('queue_updated', handleQueueUpdated);
     };
   }, []);
+
+  const submitSimulatorRating = async (queueId: string, scoreOverride?: number) => {
+    const score = scoreOverride || draftScores[queueId];
+    if (!score || score < 1 || score > 5) {
+      toast.error('กรุณาเลือกคะแนน 1-5 ดาว');
+      return;
+    }
+    setSubmittingId(queueId);
+    try {
+      const res = await fetch(`/api/queues/${encodeURIComponent(queueId)}/rate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          score,
+          comment: draftComments[queueId] || ''
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'ไม่สามารถบันทึกผลประเมินได้');
+      } else {
+        setRatedQueues((prev) => ({
+          ...prev,
+          [queueId]: { score: data.satisfaction_score, comment: data.satisfaction_comment }
+        }));
+        toast.success(`ประเมินคิว ${data.queue_number} สำเร็จ (${data.satisfaction_score}/5 ดาว)`);
+      }
+    } catch {
+      toast.error('เกิดข้อผิดพลาดในการส่งผลประเมิน');
+    } finally {
+      setSubmittingId(null);
+    }
+  };
 
   useEffect(() => {
     if (chatEndRef.current) {
@@ -144,7 +209,7 @@ export default function LineSimulator() {
                 LINE
               </div>
               <div>
-                <h3 className="font-bold text-sm tracking-tight">รพ.สต. บอทอัจฉริยะ (Messaging API)</h3>
+                <h3 className="font-bold text-sm tracking-tight">AI Smart Q Connect (LINE Bot)</h3>
                 <span className="text-[10px] text-emerald-100 flex items-center gap-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-300 animate-pulse" />
                   ระบบแจ้งเตือนแชทไลน์อัตโนมัติ
@@ -275,6 +340,10 @@ export default function LineSimulator() {
                   ) : (
                     messages.map((msg, index) => {
                       const time = new Date(msg.created_at).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
+                      const isCompletedSurvey = Boolean(msg.queue_id && typeof msg.message === 'string' && msg.message.includes('บริการเสร็จสิ้นเรียบร้อย'));
+                      const existingRating = msg.queue_id ? ratedQueues[msg.queue_id] : undefined;
+                      const selectedDraftScore = msg.queue_id ? (draftScores[msg.queue_id] || 0) : 0;
+
                       return (
                         <div key={msg.id || index} className="flex items-start gap-2.5 animate-in fade-in slide-in-from-bottom-2 duration-300">
                           {/* Bot Rounded Icon Avatar */}
@@ -282,14 +351,75 @@ export default function LineSimulator() {
                             LINE
                           </div>
                           
-                          <div className="flex flex-col items-start max-w-[70%]">
+                          <div className="flex flex-col items-start max-w-[78%]">
                             {/* Bot Name */}
-                            <span className="text-[10px] text-slate-100/80 font-bold mb-1 pl-1 font-sans">LINE รพ.สต.อัจฉริยะ</span>
+                            <span className="text-[10px] text-slate-100/80 font-bold mb-1 pl-1 font-sans">AI Smart Q Connect • รพ.สต.อัจฉริยะ</span>
                             
                             {/* Speech Bubble */}
                             <div className="bg-white text-slate-900 border border-slate-300/30 px-3.5 py-2.5 rounded-[18px] rounded-tl-none text-xs leading-relaxed whitespace-pre-wrap font-medium shadow-sm relative font-sans">
                               <span className="absolute -left-1.5 top-0 w-2.5 h-2.5 bg-white border-l-2 border-white transform rotate-45" />
                               {msg.message}
+
+                              {isCompletedSurvey && msg.queue_id && (
+                                <div className="mt-2.5 pt-2.5 border-t border-slate-200/80 whitespace-normal">
+                                  {existingRating ? (
+                                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-2.5 py-2 text-[11px] text-emerald-800">
+                                      <div className="flex items-center gap-1 font-bold">
+                                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                        <span>บันทึกคะแนน {existingRating.score}/5 ดาวแล้ว</span>
+                                      </div>
+                                      <div className="flex gap-0.5 mt-1">
+                                        {[1, 2, 3, 4, 5].map(s => (
+                                          <Star key={s} className={`w-3.5 h-3.5 ${s <= existingRating.score ? 'text-amber-400 fill-amber-400' : 'text-slate-200'}`} />
+                                        ))}
+                                      </div>
+                                      {existingRating.comment && (
+                                        <p className="text-[10px] text-emerald-700 italic mt-1">"{existingRating.comment}"</p>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div className="space-y-2">
+                                      <div className="flex items-center justify-between gap-1">
+                                        {[1, 2, 3, 4, 5].map(star => (
+                                          <button
+                                            key={star}
+                                            type="button"
+                                            disabled={submittingId === msg.queue_id}
+                                            onClick={() => setDraftScores(prev => ({ ...prev, [msg.queue_id]: star }))}
+                                            className="p-1 rounded-lg hover:bg-amber-50 transition-colors cursor-pointer"
+                                            title={`ให้ ${star} ดาว`}
+                                          >
+                                            <Star
+                                              className={`w-5 h-5 ${star <= selectedDraftScore ? 'text-amber-400 fill-amber-400' : 'text-slate-300'}`}
+                                            />
+                                          </button>
+                                        ))}
+                                      </div>
+                                      {selectedDraftScore > 0 && (
+                                        <div className="space-y-1.5">
+                                          <input
+                                            type="text"
+                                            value={draftComments[msg.queue_id] || ''}
+                                            onChange={e => setDraftComments(prev => ({ ...prev, [msg.queue_id]: e.target.value }))}
+                                            placeholder="ข้อเสนอแนะเพิ่มเติม (ถ้ามี)..."
+                                            maxLength={120}
+                                            className="w-full px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-[11px] outline-none focus:border-teal-500"
+                                          />
+                                          <button
+                                            type="button"
+                                            disabled={submittingId === msg.queue_id}
+                                            onClick={() => submitSimulatorRating(msg.queue_id)}
+                                            className="w-full bg-[#06C755] hover:bg-[#05b04b] text-white font-bold py-1.5 rounded-lg text-[11px] flex items-center justify-center gap-1 transition-colors disabled:opacity-50 cursor-pointer"
+                                          >
+                                            <Send className="w-3 h-3" />
+                                            {submittingId === msg.queue_id ? 'กำลังบันทึก...' : `ส่งประเมิน ${selectedDraftScore} ดาว`}
+                                          </button>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
                             </div>
                             
                             {/* Time stamp */}

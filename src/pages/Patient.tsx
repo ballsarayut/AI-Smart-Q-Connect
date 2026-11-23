@@ -211,7 +211,10 @@ export default function Patient() {
   const [submittingRating, setSubmittingRating] = useState(false);
 
   const handleRate = async (score: number) => {
-    if (!myQueue) return;
+    if (!myQueue || score < 1 || score > 5) {
+      toast.error('กรุณาเลือกคะแนนประเมิน 1-5 ดาว');
+      return;
+    }
     setSubmittingRating(true);
     try {
       const res = await fetch(`/api/queues/${myQueue.id}/rate`, {
@@ -219,12 +222,18 @@ export default function Patient() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ score, comment: reviewComment })
       });
+      const updated = await res.json();
       if (res.ok) {
-        const updated = await res.json();
         setMyQueue(updated);
+        toast.success('บันทึกคะแนนประเมินความพึงพอใจเรียบร้อยแล้ว');
+      } else {
+        toast.error(updated.error || 'ไม่สามารถส่งผลประเมินได้');
       }
-    } catch(err) {}
-    setSubmittingRating(false);
+    } catch {
+      toast.error('เกิดข้อผิดพลาดในการส่งผลประเมิน');
+    } finally {
+      setSubmittingRating(false);
+    }
   };
 
   // Active operating hours from settings
@@ -312,6 +321,20 @@ export default function Patient() {
   }, [timeSlots]);
 
   useEffect(() => {
+    const savedQueueId = localStorage.getItem('ai_smart_q_my_queue_id');
+    if (savedQueueId) {
+      fetch(`/api/queues/${encodeURIComponent(savedQueueId)}`)
+        .then(res => (res.ok ? res.json() : null))
+        .then(data => {
+          if (data && data.id) {
+            setMyQueue(data);
+          } else {
+            localStorage.removeItem('ai_smart_q_my_queue_id');
+          }
+        })
+        .catch(() => {});
+    }
+
     fetch('/api/services')
       .then(res => { if (!res.ok) throw new Error(); return res.json(); })
       .then(data => setServices(data))
@@ -801,6 +824,7 @@ export default function Patient() {
         speak(`เกิดข้อผิดพลาดในการจองคิวค่ะ ${data.error || ''}`);
       } else {
         setMyQueue(data);
+        localStorage.setItem('ai_smart_q_my_queue_id', data.id);
         toast.success(`จองคิวสำเร็จ! หมายเลขคิวของคุณคือ ${data.queue_number}`);
         speak(`จองคิวสำเร็จแล้วค่ะ หมายเลขคิวของคุณคือ ${data.queue_number.split('').join(' ')}`);
       }
@@ -842,6 +866,7 @@ export default function Patient() {
         toast.error(data.error || 'เกิดข้อผิดพลาดในการจองคิว');
       } else {
         setMyQueue(data);
+        localStorage.setItem('ai_smart_q_my_queue_id', data.id);
         toast.success(`จองคิวสำเร็จ! หมายเลขคิวของคุณคือ ${data.queue_number}`);
       }
     } catch (err) {
@@ -1215,15 +1240,37 @@ export default function Patient() {
                     </>
                   ) : (
                     <div className="text-center">
-                      <div className="inline-flex items-center justify-center p-3 bg-amber-50 text-amber-500 rounded-full mb-2">
+                      <div className="inline-flex items-center justify-center p-3 bg-emerald-50 text-emerald-500 rounded-full mb-2">
                         <CheckCircle2 className="w-8 h-8" />
                       </div>
-                      <p className="text-sm rounded-xl font-bold text-slate-800">ขอบคุณสำหรับคำโหวตของคุณ!</p>
-                      <p className="text-xs text-slate-500 mt-1">เราจะนำไปปรับปรุงการให้บริการในครั้งต่อไป</p>
+                      <p className="text-sm rounded-xl font-bold text-slate-800">ขอบคุณสำหรับการประเมินความพึงพอใจ!</p>
+                      <div className="flex justify-center items-center gap-1 my-2">
+                        {[1, 2, 3, 4, 5].map(star => (
+                          <Star
+                            key={star}
+                            className={`w-6 h-6 ${star <= (myQueue.satisfaction_score || 0) ? 'text-amber-400 fill-amber-400' : 'text-slate-200'}`}
+                          />
+                        ))}
+                        <span className="ml-1.5 text-xs font-black text-slate-700">({myQueue.satisfaction_score}/5)</span>
+                      </div>
+                      {myQueue.satisfaction_comment && (
+                        <p className="text-xs text-slate-600 italic bg-slate-50 px-3 py-2 rounded-xl border border-slate-100 max-w-xs mx-auto mb-2">
+                          "{myQueue.satisfaction_comment}"
+                        </p>
+                      )}
+                      <p className="text-xs text-slate-500 mt-1">ระบบบันทึกผลเข้าสู่รายงาน รพ.สต. เรียบร้อยแล้ว</p>
                     </div>
                   )}
                   
-                  <button onClick={() => setMyQueue(null)} className="mt-8 text-teal-600 font-bold text-sm flex items-center gap-1 uppercase tracking-wider">
+                  <button
+                    onClick={() => {
+                      localStorage.removeItem('ai_smart_q_my_queue_id');
+                      setRatingScore(0);
+                      setReviewComment('');
+                      setMyQueue(null);
+                    }}
+                    className="mt-8 text-teal-600 font-bold text-sm flex items-center gap-1 uppercase tracking-wider cursor-pointer"
+                  >
                     <ArrowLeft className="w-4 h-4"/> กลับหน้าแรก
                   </button>
                 </div>

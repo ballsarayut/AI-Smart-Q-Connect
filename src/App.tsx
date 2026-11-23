@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { BrowserRouter as Router, Routes, Route, Link } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { useEffect, useState, useRef } from 'react';
 import liff from '@line/liff';
-import { CheckCircle2 } from 'lucide-react';
-import { Toaster } from 'react-hot-toast';
+import { CheckCircle2, Star, AlertCircle, ArrowLeft } from 'lucide-react';
+import toast, { Toaster } from 'react-hot-toast';
 import Home from './pages/Home';
 import Patient from './pages/Patient';
 import Admin from './pages/Admin';
@@ -22,20 +22,66 @@ import { initLiff } from './lib/liffHelper';
 export default function App() {
   const [isLiffReady, setIsLiffReady] = useState(false);
   const [isRatingFlow, setIsRatingFlow] = useState(false);
+  const [ratingQueueInfo, setRatingQueueInfo] = useState<any>(null);
+  const [selectedScore, setSelectedScore] = useState<number>(0);
+  const [hoverScore, setHoverScore] = useState<number>(0);
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
+  const [ratingError, setRatingError] = useState<string | null>(null);
   const [reviewComment, setReviewComment] = useState('');
   const [submittingComment, setSubmittingComment] = useState(false);
   const [commentSubmitted, setCommentSubmitted] = useState(false);
   const rateProcessed = useRef(false);
 
   useEffect(() => {
-    // Check if we are handling a quick rating from LINE
     const params = new URLSearchParams(window.location.search);
     const rate = params.get('rate');
     const qid = params.get('qid');
 
     if (rate && qid) {
-       setIsRatingFlow(true);
+      setIsRatingFlow(true);
+      const parsedRate = parseInt(rate, 10);
+
+      // Load queue info independently of LIFF
+      fetch(`/api/queues/${encodeURIComponent(qid)}`)
+        .then(res => {
+          if (!res.ok) throw new Error('ไม่พบข้อมูลคิวนี้ในระบบ (อาจเป็นคิวจากรอบการรันก่อนหน้า)');
+          return res.json();
+        })
+        .then(qData => {
+          setRatingQueueInfo(qData);
+          if (qData.satisfaction_score) {
+            setSelectedScore(qData.satisfaction_score);
+          }
+          if (qData.satisfaction_comment) {
+            setReviewComment(qData.satisfaction_comment);
+          }
+        })
+        .catch(err => {
+          setRatingError(err.message || 'ไม่สามารถโหลดข้อมูลคิวได้');
+        });
+
+      // Immediately save score if ?rate=1..5&qid=...
+      if (parsedRate >= 1 && parsedRate <= 5 && !rateProcessed.current) {
+        rateProcessed.current = true;
+        setSelectedScore(parsedRate);
+        fetch(`/api/queues/${encodeURIComponent(qid)}/rate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ score: parsedRate })
+        })
+          .then(async res => {
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || 'บันทึกคะแนนไม่สำเร็จ');
+            setRatingQueueInfo(data);
+            setRatingSubmitted(true);
+          })
+          .catch(err => {
+            setRatingError(err.message || 'ไม่สามารถบันทึกคะแนนประเมินได้');
+            setRatingSubmitted(true);
+          });
+      } else {
+        setRatingSubmitted(true);
+      }
     }
 
     // Globally process LIFF auth callbacks across all pages
@@ -45,17 +91,7 @@ export default function App() {
         if (data.line_liff_id && data.line_liff_id.trim() !== '') {
           initLiff(data.line_liff_id.trim())
             .then(() => {
-               setIsLiffReady(true);
-               if (rate && qid && !rateProcessed.current) {
-                 rateProcessed.current = true;
-                 fetch(`/api/queues/${qid}/rate`, {
-                   method: 'POST',
-                   headers: { 'Content-Type': 'application/json' },
-                   body: JSON.stringify({ score: parseInt(rate, 10) })
-                 }).then(() => {
-                   setRatingSubmitted(true);
-                 }).catch(console.error);
-               }
+              setIsLiffReady(true);
             })
             .catch(e => {
               console.error('Global LIFF init error', e);
@@ -71,27 +107,33 @@ export default function App() {
       });
   }, []);
 
-  const handleCommentSubmit = async () => {
+  const handleRatingSubmit = async () => {
     const params = new URLSearchParams(window.location.search);
-    const rate = params.get('rate');
     const qid = params.get('qid');
-    if (!rate || !qid || !reviewComment.trim()) return;
-    
+    if (!qid || selectedScore < 1 || selectedScore > 5) {
+      toast.error('กรุณาเลือกคะแนนความพึงพอใจ 1-5 ดาว');
+      return;
+    }
+
     setSubmittingComment(true);
     try {
-      await fetch(`/api/queues/${qid}/rate`, {
+      const res = await fetch(`/api/queues/${encodeURIComponent(qid)}/rate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ score: parseInt(rate, 10), comment: reviewComment })
+        body: JSON.stringify({ score: selectedScore, comment: reviewComment })
       });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'ไม่สามารถส่งผลประเมินได้');
+
+      setRatingQueueInfo(data);
       setCommentSubmitted(true);
+      toast.success('บันทึกผลการประเมินเรียบร้อยแล้ว');
       if (liff.isInClient()) {
-        setTimeout(() => liff.closeWindow(), 1500);
-      } else {
-        setTimeout(() => window.close(), 1500);
+        setTimeout(() => liff.closeWindow(), 1800);
       }
-    } catch(e) {
-      console.error(e);
+    } catch (e: any) {
+      toast.error(e.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล');
+    } finally {
       setSubmittingComment(false);
     }
   };
@@ -99,63 +141,119 @@ export default function App() {
   if (isRatingFlow) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center font-sans p-6">
-        <div className="bg-white p-6 sm:p-8 border-2 border-slate-200 rounded-2xl shadow-sm text-center max-w-sm w-full">
-           {ratingSubmitted ? (
-             <div className="animate-in fade-in zoom-in duration-500">
-               {commentSubmitted ? (
-                 <>
-                   <div className="inline-flex drop-shadow-sm items-center justify-center p-4 bg-emerald-50 text-emerald-500 rounded-full mb-4">
-                     <CheckCircle2 className="w-16 h-16" />
-                   </div>
-                   <h2 className="text-xl font-black text-slate-800 mb-2">ขอบคุณสำหรับข้อคิดเห็นค่ะ!</h2>
-                   <p className="text-sm font-medium text-slate-500">เราจะนำไปปรับปรุงการให้บริการให้ดียิ่งขึ้น</p>
-                   <p className="text-xs text-slate-400 mt-4">(ระบบกำลังจะปิดหน้านี้)</p>
-                 </>
-               ) : (
-                 <>
-                   <div className="inline-flex drop-shadow-sm items-center justify-center p-3 bg-emerald-50 text-emerald-500 rounded-full mb-4">
-                     <CheckCircle2 className="w-10 h-10" />
-                   </div>
-                   <h2 className="text-lg font-black text-slate-800 mb-2">บันทึกคะแนนประเมินแล้ว</h2>
-                   <p className="text-[13px] font-medium text-slate-500 mb-5">หากมีข้อเสนอแนะเพิ่มเติม สามารถพิมพ์บอกเราได้ค่ะ</p>
-                   
-                   <textarea
-                     value={reviewComment}
-                     onChange={(e) => setReviewComment(e.target.value)}
-                     placeholder="พิมพ์ข้อคิดเห็นหรือข้อเสนอแนะ (ไม่บังคับ)..."
-                     rows={3}
-                     className="w-full text-left px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:bg-white focus:border-amber-500 transition-all resize-none mb-4 shadow-inner"
-                     maxLength={200}
-                   />
-                   
-                   <div className="flex gap-2">
-                     <button
-                       onClick={() => {
-                         if (liff.isInClient()) liff.closeWindow();
-                         else window.close();
-                       }}
-                       className="flex-1 py-3 rounded-xl border-2 border-slate-100 text-slate-500 font-bold text-[11px] tracking-wider uppercase hover:bg-slate-50 hover:text-slate-700 transition-colors active:scale-95"
-                     >
-                       ข้าม / ปิด
-                     </button>
-                     <button
-                       onClick={handleCommentSubmit}
-                       disabled={submittingComment || !reviewComment.trim()}
-                       className="flex-1 py-3 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white font-bold text-[11px] tracking-wider uppercase shadow-sm shadow-amber-500/20 transition-all active:scale-95"
-                     >
-                       {submittingComment ? 'กำลังส่ง...' : 'ส่งข้อเสนอแนะ'}
-                     </button>
-                   </div>
-                 </>
-               )}
-             </div>
-           ) : (
-             <div className="flex flex-col items-center justify-center py-6">
-               <div className="w-10 h-10 border-4 border-amber-500 border-t-amber-100 rounded-full animate-spin mb-4"></div>
-               <p className="text-slate-500 font-bold text-sm tracking-widest uppercase mb-1">กำลังบันทึกคะแนน</p>
-               <p className="text-xs text-slate-400">โปรดรอสักครู่...</p>
-             </div>
-           )}
+        <Toaster position="top-center" />
+        <div className="bg-white p-6 sm:p-8 border-2 border-slate-200 rounded-3xl shadow-xl text-center max-w-sm w-full">
+          {ratingError ? (
+            <div className="py-4">
+              <div className="inline-flex items-center justify-center p-4 bg-rose-50 text-rose-500 rounded-full mb-4">
+                <AlertCircle className="w-12 h-12" />
+              </div>
+              <h2 className="text-lg font-black text-slate-800 mb-2">ไม่สามารถประเมินคิวนี้ได้</h2>
+              <p className="text-xs font-medium text-slate-500 mb-6">{ratingError}</p>
+              <button
+                onClick={() => { window.location.href = '/'; }}
+                className="w-full py-3 rounded-xl bg-slate-900 hover:bg-teal-600 text-white font-bold text-xs uppercase tracking-wider transition-colors flex items-center justify-center gap-2"
+              >
+                <ArrowLeft className="w-4 h-4" /> กลับหน้าหลัก AI Smart Q Connect
+              </button>
+            </div>
+          ) : ratingSubmitted ? (
+            <div className="animate-in fade-in zoom-in duration-300">
+              {commentSubmitted ? (
+                <>
+                  <div className="inline-flex drop-shadow-sm items-center justify-center p-4 bg-emerald-50 text-emerald-500 rounded-full mb-4">
+                    <CheckCircle2 className="w-14 h-14" />
+                  </div>
+                  <h2 className="text-xl font-black text-slate-800 mb-2">ขอบคุณสำหรับข้อคิดเห็นค่ะ!</h2>
+                  <div className="flex justify-center gap-1 mb-3">
+                    {[1, 2, 3, 4, 5].map(s => (
+                      <Star key={s} className={`w-6 h-6 ${s <= selectedScore ? 'text-amber-400 fill-amber-400' : 'text-slate-200'}`} />
+                    ))}
+                  </div>
+                  <p className="text-sm font-medium text-slate-500 mb-6">
+                    ระบบบันทึกผลการประเมินสู่รายงานความพึงพอใจของ รพ.สต. เรียบร้อยแล้ว
+                  </p>
+                  <button
+                    onClick={() => {
+                      if (liff.isInClient()) liff.closeWindow();
+                      else window.location.href = '/';
+                    }}
+                    className="w-full py-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs uppercase tracking-wider transition-colors"
+                  >
+                    กลับหน้าแรก
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="inline-flex drop-shadow-sm items-center justify-center p-3 bg-emerald-50 text-emerald-500 rounded-full mb-3">
+                    <CheckCircle2 className="w-10 h-10" />
+                  </div>
+                  {ratingQueueInfo && (
+                    <div className="mb-3 px-3 py-1.5 bg-teal-50 border border-teal-100 rounded-full inline-block text-xs font-black text-teal-700">
+                      คิว {ratingQueueInfo.queue_number} • {ratingQueueInfo.service_name}
+                    </div>
+                  )}
+                  <h2 className="text-lg font-black text-slate-800 mb-1">
+                    {selectedScore > 0 ? 'บันทึกคะแนนประเมินแล้ว' : 'ประเมินความพึงพอใจบริการ'}
+                  </h2>
+                  <p className="text-[12px] font-medium text-slate-500 mb-4">
+                    แตะเลือกดาวและพิมพ์ข้อเสนอแนะเพิ่มเติมได้เลยค่ะ
+                  </p>
+
+                  <div className="flex justify-center gap-2 mb-4">
+                    {[1, 2, 3, 4, 5].map(star => (
+                      <button
+                        key={star}
+                        type="button"
+                        onMouseEnter={() => setHoverScore(star)}
+                        onMouseLeave={() => setHoverScore(0)}
+                        onClick={() => setSelectedScore(star)}
+                        className="transition-transform hover:scale-110 focus:outline-none cursor-pointer"
+                      >
+                        <Star
+                          className={`w-9 h-9 ${star <= (hoverScore || selectedScore) ? 'text-amber-400 fill-amber-400' : 'text-slate-200'} transition-colors`}
+                        />
+                      </button>
+                    ))}
+                  </div>
+
+                  <textarea
+                    value={reviewComment}
+                    onChange={(e) => setReviewComment(e.target.value)}
+                    placeholder="พิมพ์ข้อคิดเห็นหรือข้อเสนอแนะ (ไม่บังคับ)..."
+                    rows={3}
+                    className="w-full text-left px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:bg-white focus:border-amber-500 transition-all resize-none mb-4 shadow-inner"
+                    maxLength={200}
+                  />
+
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        if (liff.isInClient()) liff.closeWindow();
+                        else window.location.href = '/';
+                      }}
+                      className="flex-1 py-3 rounded-xl border-2 border-slate-100 text-slate-500 font-bold text-[11px] tracking-wider uppercase hover:bg-slate-50 hover:text-slate-700 transition-colors active:scale-95"
+                    >
+                      กลับหน้าแรก
+                    </button>
+                    <button
+                      onClick={handleRatingSubmit}
+                      disabled={submittingComment || selectedScore < 1}
+                      className="flex-1 py-3 rounded-xl bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white font-bold text-[11px] tracking-wider uppercase shadow-sm shadow-amber-500/20 transition-all active:scale-95"
+                    >
+                      {submittingComment ? 'กำลังส่ง...' : 'ส่งผลประเมิน'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-6">
+              <div className="w-10 h-10 border-4 border-amber-500 border-t-amber-100 rounded-full animate-spin mb-4"></div>
+              <p className="text-slate-500 font-bold text-sm tracking-widest uppercase mb-1">กำลังบันทึกคะแนน</p>
+              <p className="text-xs text-slate-400">โปรดรอสักครู่...</p>
+            </div>
+          )}
         </div>
       </div>
     );

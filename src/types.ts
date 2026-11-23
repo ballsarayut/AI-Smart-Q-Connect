@@ -31,6 +31,7 @@ export interface Queue {
   preferred_time?: string;
   appointment_date?: string;
   satisfaction_score?: number;
+  satisfaction_comment?: string | null;
   estimated_wait_time?: number;
   people_in_front?: number;
 }
