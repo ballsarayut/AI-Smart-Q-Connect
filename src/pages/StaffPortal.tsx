@@ -59,7 +59,7 @@ export default function StaffPortal() {
               {isKioskSetup ? 'จุดลงทะเบียนด้วยตนเองอัตโนมัติ' : 'ระบบบริหารข้อมูลโรงพยาบาลอัจฉริยะ'}
             </p>
           </div>
-          <Link to="/" className="flex items-center gap-2 px-6 py-3 bg-white border border-slate-200 text-slate-400 hover:text-slate-600 rounded-2xl font-bold text-sm transition-all shadow-sm">
+          <Link to="/home" className="flex items-center gap-2 px-6 py-3 bg-white border border-slate-200 text-slate-400 hover:text-slate-600 rounded-2xl font-bold text-sm transition-all shadow-sm">
             <ArrowLeft className="w-4 h-4" /> กลับหน้าหลัก
           </Link>
         </header>

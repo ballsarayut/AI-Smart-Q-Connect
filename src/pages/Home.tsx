@@ -162,15 +162,15 @@ export default function Home() {
 
       {/* Top Header / Admin Controls */}
       <div className="w-full p-6 flex justify-between items-center fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-xl border-b border-slate-100/50">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center relative shadow-md">
+        <Link to="/" className="flex items-center gap-3 group">
+          <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center relative shadow-md group-hover:scale-105 transition-transform">
             <span className="text-white font-black text-2xl tracking-tighter relative z-10">Q</span>
             <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-teal-500 rounded-full border-2 border-white"></div>
           </div>
           <h1 className="text-2xl md:text-3xl font-black text-slate-900 tracking-tighter leading-tight flex-1">
             <span className="text-teal-500">AI</span> Smart <span className="text-teal-500">Q</span> Connect
           </h1>
-        </div>
+        </Link>
         {/* Desktop Menu */}
         <div className="hidden md:flex gap-3">
           <Link 

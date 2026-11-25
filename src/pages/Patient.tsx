@@ -883,7 +883,7 @@ export default function Patient() {
           {/* Header - Bento Theme Style */}
         <div className="bg-teal-600 text-white px-6 py-4 flex items-center justify-between shadow-sm border-b-2 border-teal-700 shrink-0 select-none">
           <div className="flex items-center space-x-3">
-            <Link to="/" className="w-8 h-8 hover:bg-white/10 rounded-lg flex items-center justify-center transition-colors">
+            <Link to="/home" className="w-8 h-8 hover:bg-white/10 rounded-lg flex items-center justify-center transition-colors">
               <ArrowLeft className="w-5 h-5" />
             </Link>
             <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center font-black text-white text-base">

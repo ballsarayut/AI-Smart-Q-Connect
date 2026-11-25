@@ -9,6 +9,7 @@ import liff from '@line/liff';
 import { CheckCircle2, Star, AlertCircle, ArrowLeft } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 import Home from './pages/Home';
+import Welcome from './pages/Welcome';
 import Patient from './pages/Patient';
 import Admin from './pages/Admin';
 import TV from './pages/TV';
@@ -151,7 +152,7 @@ export default function App() {
               <h2 className="text-lg font-black text-slate-800 mb-2">ไม่สามารถประเมินคิวนี้ได้</h2>
               <p className="text-xs font-medium text-slate-500 mb-6">{ratingError}</p>
               <button
-                onClick={() => { window.location.href = '/'; }}
+                onClick={() => { window.location.href = '/home'; }}
                 className="w-full py-3 rounded-xl bg-slate-900 hover:bg-teal-600 text-white font-bold text-xs uppercase tracking-wider transition-colors flex items-center justify-center gap-2"
               >
                 <ArrowLeft className="w-4 h-4" /> กลับหน้าหลัก AI Smart Q Connect
@@ -176,7 +177,7 @@ export default function App() {
                   <button
                     onClick={() => {
                       if (liff.isInClient()) liff.closeWindow();
-                      else window.location.href = '/';
+                      else window.location.href = '/home';
                     }}
                     className="w-full py-3 rounded-xl bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs uppercase tracking-wider transition-colors"
                   >
@@ -230,7 +231,7 @@ export default function App() {
                     <button
                       onClick={() => {
                         if (liff.isInClient()) liff.closeWindow();
-                        else window.location.href = '/';
+                        else window.location.href = '/home';
                       }}
                       className="flex-1 py-3 rounded-xl border-2 border-slate-100 text-slate-500 font-bold text-[11px] tracking-wider uppercase hover:bg-slate-50 hover:text-slate-700 transition-colors active:scale-95"
                     >
@@ -277,7 +278,8 @@ export default function App() {
       <div className="min-h-screen bg-slate-50 font-sans text-slate-900">
         <Toaster position="top-center" />
         <Routes>
-          <Route path="/" element={<Home />} />
+          <Route path="/" element={<Welcome />} />
+          <Route path="/home" element={<Home />} />
           <Route path="/staff-login" element={<StaffLogin />} />
           <Route path="/kiosk" element={<Kiosk />} />
           <Route path="/staff" element={<StaffPortal />} />

@@ -114,7 +114,7 @@ export default function Kiosk() {
           <button onClick={() => setShowSettings(true)} className="w-14 h-14 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-center hover:bg-slate-100 transition-all text-slate-400 hover:text-slate-600">
             <Settings className="w-6 h-6" />
           </button>
-          <Link to="/" className="w-14 h-14 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-center hover:bg-slate-100 transition-all">
+          <Link to="/home" className="w-14 h-14 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-center hover:bg-slate-100 transition-all">
             <ArrowLeft className="w-6 h-6 text-slate-400" />
           </Link>
         </div>
