@@ -18,7 +18,7 @@ import Kiosk from './pages/Kiosk';
 import StaffPortal from './pages/StaffPortal';
 import StaffLogin from './pages/StaffLogin';
 
-import { initLiff } from './lib/liffHelper';
+import { initLiff, getSafeLiffUser, sanitizeLiffId } from './lib/liffHelper';
 
 export default function App() {
   const [isLiffReady, setIsLiffReady] = useState(false);
@@ -89,9 +89,15 @@ export default function App() {
     fetch('/api/settings')
       .then(res => res.json())
       .then(data => {
-        if (data.line_liff_id && data.line_liff_id.trim() !== '') {
-          initLiff(data.line_liff_id.trim())
-            .then(() => {
+        const cleanLiffId = sanitizeLiffId(data.line_liff_id || '');
+        if (cleanLiffId) {
+          initLiff(cleanLiffId)
+            .then(async () => {
+              const user = await getSafeLiffUser();
+              if (user?.userId) {
+                localStorage.setItem('smartq_line_uid', user.userId);
+                localStorage.setItem('smartq_line_name', user.displayName);
+              }
               setIsLiffReady(true);
             })
             .catch(e => {

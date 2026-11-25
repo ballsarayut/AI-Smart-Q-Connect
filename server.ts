@@ -920,35 +920,50 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
   // Send via LINE Messaging API if a Channel Access Token is provided
   try {
     const tokenRecord = db.prepare("SELECT value FROM system_settings WHERE key = 'line_channel_access_token'").get() as any;
-    const cat = tokenRecord?.value || process.env.LINE_CHANNEL_ACCESS_TOKEN || "";
-    
-    if (cat && cat.trim() !== "") {
+    const cat = (tokenRecord?.value || process.env.LINE_CHANNEL_ACCESS_TOKEN || "").trim();
+
+    if (cat !== "") {
       const headers = {
         'Authorization': `Bearer ${cat}`,
         'Content-Type': 'application/json'
       };
 
-      // 1. Send push notification directly to this patient if they have line_uid
-      const recipientUid = queue.line_uid || "";
-      if (recipientUid && recipientUid.trim() !== "") {
-        console.log(`[LINE Messaging API] Sending PUSH message to patient ID: ${recipientUid}`);
+      const adminUidRecord = db.prepare("SELECT value FROM system_settings WHERE key = 'line_admin_uid'").get() as any;
+      const adminUid = (adminUidRecord?.value || "").trim();
+      const recipientUid = (queue.line_uid || "").trim();
+      const sentTargets = new Set<string>();
+
+      const pushToUid = async (targetUid: string, label: string) => {
+        if (!targetUid || targetUid.length < 10 || sentTargets.has(targetUid)) return;
+        sentTargets.add(targetUid);
+        console.log(`[LINE Messaging API] Sending PUSH message to ${label}: ${targetUid}`);
         const response = await fetch('https://api.line.me/v2/bot/message/push', {
           method: 'POST',
           headers,
           body: JSON.stringify({
-            to: recipientUid,
+            to: targetUid,
             messages: lineMessages
           })
         });
-        const resData = await response.json();
-        console.log('[LINE Messaging API] Push Response:', resData);
-      }
+        const resData = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          console.error(`[LINE Messaging API] Push Error (${label}):`, response.status, resData);
+        } else {
+          console.log(`[LINE Messaging API] Push Success (${label}):`, resData);
+        }
+      };
 
-      // 2. Or broadcast to all friends if enabled and the user did not receive a direct push
+      // 1. Send directly to patient if they have a valid LINE UID
+      await pushToUid(recipientUid, 'patient');
+
+      // 2. Also send a copy to Admin LINE User ID if configured (for admin visibility / testing)
+      await pushToUid(adminUid, 'admin');
+
+      // 3. Or broadcast to all friends if enabled and no direct target received the message
       const broadcastRecord = db.prepare("SELECT value FROM system_settings WHERE key = 'line_enable_broadcast'").get() as any;
       const enableBroadcast = broadcastRecord?.value === 'true';
-      if (enableBroadcast && (!recipientUid || recipientUid.trim() === "")) {
-        console.log(`[LINE Messaging API] No patient LINE UID, broadcasting message to all friends`);
+      if (enableBroadcast && sentTargets.size === 0) {
+        console.log(`[LINE Messaging API] Broadcasting message to all friends`);
         const response = await fetch('https://api.line.me/v2/bot/message/broadcast', {
           method: 'POST',
           headers,
@@ -956,8 +971,8 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
             messages: lineMessages
           })
         });
-        const resData = await response.json();
-        console.log('[LINE Messaging API] Broadcast Response:', resData);
+        const resData = await response.json().catch(() => ({}));
+        console.log('[LINE Messaging API] Broadcast Response:', response.status, resData);
       }
     }
   } catch (err) {
@@ -1021,16 +1036,18 @@ app.post("/api/queues", (req, res) => {
   }
 
   // Find or create user
-  let user = db.prepare('SELECT id FROM users WHERE citizen_id = ?').get(citizen_id) as any;
+  const incomingLineUid = typeof line_uid === 'string' ? line_uid.trim() : '';
+  let user = db.prepare('SELECT id, line_uid FROM users WHERE citizen_id = ?').get(citizen_id) as any;
   if (!user) {
     const userId = randomUUID();
     db.prepare('INSERT INTO users (id, citizen_id, full_name, phone, line_uid, role) VALUES (?, ?, ?, ?, ?, ?)')
-      .run(userId, citizen_id, full_name, phone, line_uid || '', role || 'patient');
+      .run(userId, citizen_id, full_name, phone, incomingLineUid, role || 'patient');
     user = { id: userId };
   } else {
-    // Update name/phone/line_uid
+    // Update name/phone and preserve existing line_uid if incoming is blank
+    const preservedLineUid = incomingLineUid || user.line_uid || '';
     db.prepare('UPDATE users SET full_name = ?, phone = ?, line_uid = ? WHERE id = ?')
-      .run(full_name, phone, line_uid || '', user.id);
+      .run(full_name, phone, preservedLineUid, user.id);
   }
 
   const queueId = randomUUID();
@@ -1580,7 +1597,8 @@ app.get("/api/settings", (req, res) => {
 // Add route for testing LINE messaging API connection
 app.post("/api/settings/test-line", async (req, res) => {
   try {
-    const { cat, uid } = req.body;
+    const cat = String(req.body?.cat || '').trim();
+    const uid = String(req.body?.uid || '').trim();
     if (!cat || !uid) {
       return res.status(400).json({ error: "กรุณาระบุ Channel Access Token และ User ID" });
     }
@@ -1612,11 +1630,21 @@ app.post("/api/settings/test-line", async (req, res) => {
   }
 });
 
+function normalizeLiffId(raw: string): string {
+  const trimmed = (raw || '').trim();
+  if (!trimmed) return '';
+  const match = trimmed.match(/liff\.line\.me\/([a-zA-Z0-9_-]+)/);
+  if (match && match[1]) return match[1];
+  return trimmed.split(/[?#/\s]/)[0] || '';
+}
+
 app.post("/api/settings", async (req, res) => {
   const { line_channel_access_token, line_liff_id, line_admin_uid, line_enable_broadcast, service_open_time, service_close_time, hospital_lat, hospital_lng, hospital_map_link, campaign_capacity, campaign_title, campaign_desc, campaign_start_date, campaign_end_date } = req.body;
   
-  let resolvedLat = hospital_lat || "13.7563";
-  let resolvedLng = hospital_lng || "100.5018";
+  const currentLat = (db.prepare("SELECT value FROM system_settings WHERE key = 'hospital_lat'").get() as any)?.value || "13.7563";
+  const currentLng = (db.prepare("SELECT value FROM system_settings WHERE key = 'hospital_lng'").get() as any)?.value || "100.5018";
+  let resolvedLat = hospital_lat !== undefined ? String(hospital_lat) : currentLat;
+  let resolvedLng = hospital_lng !== undefined ? String(hospital_lng) : currentLng;
 
   if (hospital_map_link) {
     let targetUrl = hospital_map_link.trim();
@@ -1665,45 +1693,68 @@ app.post("/api/settings", async (req, res) => {
   }
 
   try {
-    db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('line_channel_access_token', ?)").run(line_channel_access_token || "");
-    db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('line_liff_id', ?)").run(line_liff_id || "");
-    db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('line_admin_uid', ?)").run(line_admin_uid || "");
-    db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('line_enable_broadcast', ?)").run(line_enable_broadcast || "false");
-    db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('service_open_time', ?)").run(service_open_time || "08:30");
-    db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('service_close_time', ?)").run(service_close_time || "16:30");
-    db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('hospital_lat', ?)").run(resolvedLat);
-    db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('hospital_lng', ?)").run(resolvedLng);
-    db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('hospital_map_link', ?)").run(hospital_map_link || "");
-    if (campaign_capacity) {
-      db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('campaign_capacity', ?)").run(campaign_capacity);
+    const upsertSetting = db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)");
+    if (line_channel_access_token !== undefined) {
+      upsertSetting.run('line_channel_access_token', String(line_channel_access_token).trim());
     }
-    if (campaign_title) {
-      db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('campaign_title', ?)").run(campaign_title);
+    if (line_liff_id !== undefined) {
+      upsertSetting.run('line_liff_id', normalizeLiffId(String(line_liff_id)));
     }
-    if (campaign_desc) {
-      db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('campaign_desc', ?)").run(campaign_desc);
+    if (line_admin_uid !== undefined) {
+      upsertSetting.run('line_admin_uid', String(line_admin_uid).trim());
+    }
+    if (line_enable_broadcast !== undefined) {
+      upsertSetting.run('line_enable_broadcast', String(line_enable_broadcast));
+    }
+    if (service_open_time !== undefined) {
+      upsertSetting.run('service_open_time', String(service_open_time) || "08:30");
+    }
+    if (service_close_time !== undefined) {
+      upsertSetting.run('service_close_time', String(service_close_time) || "16:30");
+    }
+    if (hospital_lat !== undefined || hospital_map_link !== undefined) {
+      upsertSetting.run('hospital_lat', resolvedLat);
+    }
+    if (hospital_lng !== undefined || hospital_map_link !== undefined) {
+      upsertSetting.run('hospital_lng', resolvedLng);
+    }
+    if (hospital_map_link !== undefined) {
+      upsertSetting.run('hospital_map_link', String(hospital_map_link) || "");
+    }
+    if (campaign_capacity !== undefined) {
+      upsertSetting.run('campaign_capacity', String(campaign_capacity));
+    }
+    if (campaign_title !== undefined) {
+      upsertSetting.run('campaign_title', String(campaign_title));
+    }
+    if (campaign_desc !== undefined) {
+      upsertSetting.run('campaign_desc', String(campaign_desc));
     }
     if (campaign_start_date !== undefined) {
-      db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('campaign_start_date', ?)").run(campaign_start_date);
+      upsertSetting.run('campaign_start_date', String(campaign_start_date));
     }
     if (campaign_end_date !== undefined) {
-      db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('campaign_end_date', ?)").run(campaign_end_date);
+      upsertSetting.run('campaign_end_date', String(campaign_end_date));
     }
+
+    const readVal = (key: string, fallback = "") =>
+      (db.prepare("SELECT value FROM system_settings WHERE key = ?").get(key) as any)?.value ?? fallback;
+
     const settingsObj = {
-      line_channel_access_token,
-      line_liff_id,
-      line_admin_uid,
-      line_enable_broadcast,
-      service_open_time,
-      service_close_time,
-      hospital_lat: resolvedLat,
-      hospital_lng: resolvedLng,
-      hospital_map_link,
-      campaign_capacity,
-      campaign_title,
-      campaign_desc,
-      campaign_start_date,
-      campaign_end_date
+      line_channel_access_token: readVal('line_channel_access_token'),
+      line_liff_id: readVal('line_liff_id'),
+      line_admin_uid: readVal('line_admin_uid'),
+      line_enable_broadcast: readVal('line_enable_broadcast', 'false'),
+      service_open_time: readVal('service_open_time', '08:30'),
+      service_close_time: readVal('service_close_time', '16:30'),
+      hospital_lat: readVal('hospital_lat', resolvedLat),
+      hospital_lng: readVal('hospital_lng', resolvedLng),
+      hospital_map_link: readVal('hospital_map_link'),
+      campaign_capacity: readVal('campaign_capacity', '500'),
+      campaign_title: readVal('campaign_title', 'มหกรรมสุขภาพ / ฉีดวัคซีน'),
+      campaign_desc: readVal('campaign_desc'),
+      campaign_start_date: readVal('campaign_start_date'),
+      campaign_end_date: readVal('campaign_end_date')
     };
     app.get('io').emit('settings_updated', settingsObj);
     res.json({

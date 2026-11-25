@@ -7,7 +7,7 @@ import { Link } from 'react-router-dom';
 import { APIProvider, useMapsLibrary } from '@vis.gl/react-google-maps';
 import LineSimulator from '../components/LineSimulator';
 import liff from '@line/liff';
-import { initLiff } from '../lib/liffHelper';
+import { initLiff, getSafeLiffUser, sanitizeLiffId } from '../lib/liffHelper';
 import toast from 'react-hot-toast';
 
 const API_KEY = process.env.GOOGLE_MAPS_PLATFORM_KEY || '';
@@ -260,7 +260,8 @@ export default function Patient() {
   }, [campaignStartDate, campaignEndDate, appointmentDate]);
   
   const [liffInitialized, setLiffInitialized] = useState(false);
-  const [liffProfileName, setLiffProfileName] = useState('');
+  const [liffConfigured, setLiffConfigured] = useState(false);
+  const [liffProfileName, setLiffProfileName] = useState(() => localStorage.getItem('smartq_line_name') || '');
   const [liffError, setLiffError] = useState('');
 
   // Form state
@@ -271,7 +272,7 @@ export default function Patient() {
   const [phone, setPhone] = useState('');
   const [serviceId, setServiceId] = useState(initialService);
   const [role, setRole] = useState('patient');
-  const [lineUid, setLineUid] = useState('');
+  const [lineUid, setLineUid] = useState(() => localStorage.getItem('smartq_line_uid') || '');
   const [preferredTime, setPreferredTime] = useState('');
   const [slotId, setSlotId] = useState<number | null>(null);
   const [slots, setSlots] = useState<any[]>([]);
@@ -359,19 +360,25 @@ export default function Patient() {
         }
         if (data.campaign_end_date !== undefined) setCampaignEndDate(data.campaign_end_date);
         
-        if (data.line_liff_id && data.line_liff_id.trim() !== '') {
-          initLiff(data.line_liff_id.trim())
-            .then(() => {
+        const cleanLiffId = sanitizeLiffId(data.line_liff_id || '');
+        if (cleanLiffId) {
+          setLiffConfigured(true);
+          initLiff(cleanLiffId)
+            .then(async () => {
               setLiffInitialized(true);
-              if (liff.isLoggedIn()) {
-                liff.getProfile().then(profile => {
-                  setLineUid(profile.userId);
-                  setLiffProfileName(profile.displayName);
-                }).catch(err => console.error("LIFF get profile error", err));
+              setLiffError('');
+              const user = await getSafeLiffUser();
+              if (user?.userId) {
+                setLineUid(user.userId);
+                setLiffProfileName(user.displayName);
+                localStorage.setItem('smartq_line_uid', user.userId);
+                localStorage.setItem('smartq_line_name', user.displayName);
               }
             })
             .catch(err => {
               console.error("LIFF init error in Patient", err);
+              setLiffInitialized(false);
+              setLiffError(`เชื่อมต่อ LINE LIFF ไม่สำเร็จ (${err?.message || 'ตรวจสอบ LIFF ID และ Endpoint URL'}) — สามารถกรอก User ID ด้านล่างแทนได้`);
             });
         }
       });
@@ -960,59 +967,93 @@ export default function Patient() {
                   />
                 </div>
 
-                {liffInitialized && (
+                {(liffConfigured || liffInitialized || liffError || lineUid) && (
                   <div className="md:col-span-2">
                     <label className="block text-sm font-bold text-slate-700 mb-1">รับการแจ้งเตือนคิวผ่าน LINE</label>
                     {liffProfileName ? (
-                      <div className="w-full border-2 border-green-200 rounded-xl p-4 bg-green-50 flex flex-col gap-1 transition-all">
-                        <div className="flex items-center gap-2 text-green-700 font-bold text-sm">
-                          <CheckCircle2 className="w-5 h-5" /> เชื่อมต่อ LINE สำเร็จ
+                      <div className="w-full border-2 border-green-200 rounded-xl p-4 bg-green-50 flex items-center justify-between gap-3 transition-all">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2 text-green-700 font-bold text-sm">
+                            <CheckCircle2 className="w-5 h-5" /> เชื่อมต่อ LINE สำเร็จ
+                          </div>
+                          <p className="text-xs text-green-700/80 font-medium ml-7">
+                            การแจ้งเตือนคิวจะถูกส่งไปยัง <b>{liffProfileName}</b>
+                          </p>
                         </div>
-                        <p className="text-xs text-green-700/80 font-medium ml-7">
-                          การแจ้งเตือนคิวจะถูกส่งไปยัง <b>{liffProfileName}</b>
-                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            try { if (liffInitialized && liff.isLoggedIn()) liff.logout(); } catch {}
+                            setLiffProfileName('');
+                            setLineUid('');
+                            localStorage.removeItem('smartq_line_uid');
+                            localStorage.removeItem('smartq_line_name');
+                          }}
+                          className="text-xs font-bold text-slate-500 hover:text-rose-600 px-2.5 py-1.5 rounded-lg hover:bg-white transition-colors shrink-0 cursor-pointer"
+                        >
+                          เปลี่ยนบัญชี
+                        </button>
                       </div>
                     ) : (
-                            <div className="w-full flex flex-col gap-2">
-                              <div className="w-full border-2 border-slate-200 rounded-xl p-4 bg-slate-50 flex items-center justify-between gap-4 transition-all">
-                                <div>
-                                  <p className="text-xs text-slate-500 font-medium">เข้าสู่ระบบด้วยบัญชี LINE ของคุณเพื่อรับการแจ้งเตือน</p>
-                                  <div className="mt-2 flex items-center gap-2">
-                                    <input 
-                                      type="text" 
-                                      placeholder="หรือกรอก User ID ด้วยตนเอง (ขึ้นต้นด้วย U...)" 
-                                      className="border-2 border-slate-200 rounded-lg p-2 text-xs w-full max-w-[200px] outline-none focus:border-teal-500"
-                                      onChange={(e) => {
-                                        setLineUid(e.target.value);
-                                        if (e.target.value.startsWith('U')) {
-                                          setLiffProfileName('คุณ (กรอกเอง)');
-                                        } else if (!e.target.value) {
-                                          setLiffProfileName('');
-                                        }
-                                      }}
-                                    />
-                                  </div>
-                                </div>
-                                <button 
-                                  type="button"
-                                  onClick={() => {
-                                    try {
-                                      if (window.self !== window.top) {
-                                        setLiffError("สถานะ: จำลองใน AI Studio - โปรดกรอก User ID ในช่องซ้ายมือแทน หรือเปิดแท็บใหม่");
-                                      } else {
-                                        liff.login();
-                                      }
-                                    } catch (e) {
-                                      liff.login();
-                                    }
-                                  }}
-                                  className="bg-[#06C755] hover:bg-[#05b34c] text-white px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm whitespace-nowrap active:scale-95 transition-all flex items-center gap-2"
-                                >
-                                  ล็อกอิน LINE
-                                </button>
-                              </div>
-                              {liffError && <p className="text-xs text-amber-600 font-semibold mt-1 px-1">{liffError}</p>}
+                      <div className="w-full flex flex-col gap-2">
+                        <div className="w-full border-2 border-slate-200 rounded-xl p-4 bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs text-slate-600 font-medium">
+                              ล็อกอินผ่าน LINE หรือกรอก LINE User ID ของคุณเพื่อรับการแจ้งเตือนคิว
+                            </p>
+                            <div className="mt-2 flex flex-col sm:flex-row sm:items-center gap-2">
+                              <input 
+                                type="text"
+                                value={lineUid}
+                                placeholder="กรอก LINE User ID (เช่น U1234567890abcdef...)" 
+                                className="border-2 border-slate-200 bg-white rounded-lg px-3 py-2 text-xs w-full sm:max-w-[300px] font-mono outline-none focus:border-teal-500"
+                                onChange={(e) => {
+                                  const val = e.target.value.trim();
+                                  setLineUid(val);
+                                  if (val) {
+                                    localStorage.setItem('smartq_line_uid', val);
+                                  } else {
+                                    localStorage.removeItem('smartq_line_uid');
+                                  }
+                                }}
+                              />
+                              {lineUid.trim().startsWith('U') && lineUid.trim().length >= 16 && (
+                                <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 whitespace-nowrap">
+                                  <CheckCircle2 className="w-4 h-4" /> พร้อมส่งแจ้งเตือน
+                                </span>
+                              )}
                             </div>
+                          </div>
+                          {liffInitialized && (
+                            window.self !== window.top ? (
+                              <a
+                                href={window.location.href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="bg-[#06C755] hover:bg-[#05b34c] text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-sm whitespace-nowrap active:scale-95 transition-all inline-flex items-center justify-center gap-2 shrink-0"
+                              >
+                                เปิดแท็บใหม่เพื่อล็อกอิน LINE
+                              </a>
+                            ) : (
+                              <button 
+                                type="button"
+                                onClick={() => {
+                                  try {
+                                    setLiffError('');
+                                    liff.login({ redirectUri: window.location.href });
+                                  } catch (e: any) {
+                                    setLiffError(`ล็อกอิน LINE ไม่สำเร็จ: ${e?.message || 'กรุณาตรวจสอบ Endpoint URL ใน LINE Developers Console'}`);
+                                  }
+                                }}
+                                className="bg-[#06C755] hover:bg-[#05b34c] text-white px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm whitespace-nowrap active:scale-95 transition-all inline-flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+                              >
+                                ล็อกอิน LINE
+                              </button>
+                            )
+                          )}
+                        </div>
+                        {liffError && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 font-semibold">{liffError}</p>}
+                      </div>
                     )}
                   </div>
                 )}

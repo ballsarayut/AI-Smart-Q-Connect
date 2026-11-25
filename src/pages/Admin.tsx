@@ -33,6 +33,7 @@ export default function Admin() {
   const [lineToken, setLineToken] = useState('');
   const [lineLiffId, setLineLiffId] = useState('');
   const [lineAdmin, setLineAdmin] = useState('');
+  const [lineEnableBroadcast, setLineEnableBroadcast] = useState('false');
   const [campaignCapacity, setCampaignCapacity] = useState('500');
   const [campaignTitle, setCampaignTitle] = useState('มหกรรมสุขภาพ / ฉีดวัคซีน');
   const [campaignDesc, setCampaignDesc] = useState('โหมด Mass Campaign: ระบบทำการกระจายคิวอัตโนมัติ เพื่อลดความแออัด');
@@ -114,6 +115,7 @@ export default function Admin() {
         if (data.line_channel_access_token !== undefined) setLineToken(data.line_channel_access_token);
         if (data.line_liff_id !== undefined) setLineLiffId(data.line_liff_id);
         if (data.line_admin_uid !== undefined) setLineAdmin(data.line_admin_uid);
+        if (data.line_enable_broadcast !== undefined) setLineEnableBroadcast(data.line_enable_broadcast);
         if (data.campaign_capacity !== undefined) setCampaignCapacity(data.campaign_capacity);
         if (data.campaign_title !== undefined) setCampaignTitle(data.campaign_title);
         if (data.campaign_desc !== undefined) setCampaignDesc(data.campaign_desc);
@@ -174,7 +176,9 @@ export default function Admin() {
   };
 
   const handleTestLine = async () => {
-    if (!lineToken || !lineAdmin) {
+    const cleanToken = lineToken.trim();
+    const cleanAdmin = lineAdmin.trim();
+    if (!cleanToken || !cleanAdmin) {
       setTestLineResult({ error: "โปรดระบุ LINE Channel Access Token และ Admin LINE User ID ก่อนทดสอบ (และต้องใส่ค่าให้ตรงกับเครื่องของตนเอง)" });
       return;
     }
@@ -182,16 +186,28 @@ export default function Admin() {
     setTestLineLoading(true);
     setTestLineResult(null);
     try {
+      // Auto-persist LINE credentials so notifications work immediately without scrolling down to Save
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          line_channel_access_token: cleanToken,
+          line_liff_id: lineLiffId.trim(),
+          line_admin_uid: cleanAdmin,
+          line_enable_broadcast: lineEnableBroadcast
+        })
+      });
+
       const res = await fetch('/api/settings/test-line', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cat: lineToken, uid: lineAdmin })
+        body: JSON.stringify({ cat: cleanToken, uid: cleanAdmin })
       });
       const data = await res.json();
       if (!res.ok) {
         setTestLineResult({ error: data.error });
       } else {
-        setTestLineResult({ success: true, message: data.message });
+        setTestLineResult({ success: true, message: `${data.message} (และบันทึกค่า Token / LIFF / Admin UID แล้ว)` });
       }
     } catch (err: any) {
       if (err && err.message && err.message.toLowerCase().includes('failed to fetch')) {
@@ -222,9 +238,10 @@ export default function Admin() {
           hospital_lat: hospitalLat,
           hospital_lng: hospitalLng,
           hospital_map_link: mapLink,
-          line_channel_access_token: lineToken,
-          line_liff_id: lineLiffId,
-          line_admin_uid: lineAdmin,
+          line_channel_access_token: lineToken.trim(),
+          line_liff_id: lineLiffId.trim(),
+          line_admin_uid: lineAdmin.trim(),
+          line_enable_broadcast: lineEnableBroadcast,
           campaign_title: campaignTitle,
           campaign_desc: campaignDesc,
           campaign_start_date: campaignStartDate,
@@ -675,11 +692,29 @@ export default function Admin() {
                     className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-green-500 focus:bg-white font-medium text-sm transition-all"
                     placeholder="เช่น 1234567890-abcdefgh"
                   />
-                  <p className="text-[10px] text-slate-400 mt-2 font-medium">เพื่อดึง User ID ของผู้ใช้เมื่อเปิดผ่านริชเมนูใน LINE อัตโนมัติ</p>
+                  <div className="mt-2 bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="text-[11px] text-slate-600">
+                      <span className="font-bold text-slate-700">LIFF Endpoint URL: </span>
+                      <span className="font-mono text-slate-800">{window.location.origin}/</span>
+                      <span className="block text-[10px] text-slate-500 mt-0.5">
+                        นำลิงก์นี้ไปตั้งเป็น Endpoint URL ใน LINE Developers Console &gt; LIFF และเปิด Scope: profile, openid (เปิดนอก iframe / แท็บใหม่เพื่อล็อกอินผ่าน LINE ได้ปกติ)
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(`${window.location.origin}/`);
+                        toast.success('คัดลอก LIFF Endpoint URL แล้ว');
+                      }}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-[11px] font-bold whitespace-nowrap cursor-pointer shrink-0"
+                    >
+                      คัดลอก Endpoint
+                    </button>
+                  </div>
                 </div>
                 <div className="mt-2">
                   <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">
-                    Admin LINE User ID (ตัวเลือก - สำหรับแอดมินรับข้อความ)
+                    Admin LINE User ID (ส่งสำเนาแจ้งเตือนทุกคิวไปหาแอดมิน / ใช้ทดสอบ)
                   </label>
                   <input
                     type="text"
@@ -688,6 +723,21 @@ export default function Admin() {
                     className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 outline-none focus:border-green-500 focus:bg-white font-medium text-sm transition-all"
                     placeholder="เช่น U1234567890abcdef1234567890abcdef"
                   />
+                </div>
+                <div className="mt-1">
+                  <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">
+                    โหมดส่งข้อความกรณีผู้ป่วยไม่ได้เชื่อมต่อ LINE
+                  </label>
+                  <select
+                    value={lineEnableBroadcast}
+                    onChange={e => setLineEnableBroadcast(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-100 rounded-2xl p-3.5 outline-none focus:border-green-500 focus:bg-white font-medium text-sm transition-all"
+                  >
+                    <option value="false">ส่งเฉพาะผู้ป่วยที่มี LINE UID และ Admin User ID เท่านั้น (แนะนำ)</option>
+                    <option value="true">บรอดแคสต์หาเพื่อนทุกคนใน LINE OA เมื่อไม่มี UID ระบุไว้</option>
+                  </select>
+                </div>
+                <div>
                   <div className="mt-4 flex flex-col items-start gap-2">
                     <button
                       type="button"
