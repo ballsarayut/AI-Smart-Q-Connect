@@ -712,6 +712,32 @@ export default function Admin() {
                     )}
                   </div>
                 </div>
+                <div className="mt-2 bg-emerald-50/60 border border-emerald-200 rounded-2xl p-4">
+                  <label className="block text-[10px] font-black text-emerald-700 uppercase tracking-widest mb-2">
+                    LINE Webhook URL (สำหรับรับการกดให้ดาวและพิมพ์คอมเมนต์ตอบกลับในแชท LINE)
+                  </label>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={`${window.location.origin}/api/line/webhook`}
+                      className="flex-1 bg-white border border-emerald-200 rounded-xl px-3 py-2 text-xs font-mono text-slate-700 outline-none select-all"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(`${window.location.origin}/api/line/webhook`);
+                        toast.success('คัดลอก Webhook URL แล้ว');
+                      }}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors whitespace-nowrap cursor-pointer"
+                    >
+                      คัดลอก URL
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-emerald-800/80 mt-2 font-medium">
+                    นำลิงก์นี้ไปวางใน LINE Developers Console &gt; Messaging API &gt; Webhook URL และเปิด &quot;Use webhook&quot; เพื่อให้ผู้ป่วยกดดาวหรือพิมพ์รีวิวตอบกลับใน LINE Chat ได้ทันที (หากไม่ตั้งค่า Webhook ปุ่มให้ดาวและลิงก์รีวิวใน LINE ยังเปิดหน้ากรอกรีวิวผ่านเบราว์เซอร์ใน LINE ได้ปกติ)
+                  </p>
+                </div>
               </div>
               
               <div className="flex items-center justify-between pt-8 border-t border-slate-50">

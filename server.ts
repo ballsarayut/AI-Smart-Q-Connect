@@ -13,9 +13,20 @@ function getThailandTimeStr() {
 
 const app = express();
 const PORT = 3000;
+let detectedAppUrl = "";
 
 // Middleware
 app.use(express.json());
+app.use((req, _res, next) => {
+  const fwdHost = req.headers['x-forwarded-host'];
+  const rawHost = Array.isArray(fwdHost) ? fwdHost[0] : (fwdHost || req.headers.host || '');
+  if (rawHost && !rawHost.includes('localhost') && !rawHost.includes('127.0.0.1')) {
+    const fwdProto = req.headers['x-forwarded-proto'];
+    const proto = Array.isArray(fwdProto) ? fwdProto[0] : (fwdProto || 'https');
+    detectedAppUrl = `${proto}://${rawHost}`.replace(/\/$/, '');
+  }
+  next();
+});
 
 // Initialize SQLite database (in-memory for prototype, normally a file like app.db)
 const db = new Database(':memory:');
@@ -86,9 +97,19 @@ db.exec(`
     queue_id TEXT,
     queue_number TEXT,
     message TEXT,
+    sender TEXT DEFAULT 'bot',
     created_at DATETIME
   );
+
+  CREATE TABLE IF NOT EXISTS line_pending_reviews (
+    line_uid TEXT PRIMARY KEY,
+    queue_id TEXT,
+    stage TEXT,
+    updated_at DATETIME
+  );
 `);
+
+try { db.prepare("ALTER TABLE line_logs ADD COLUMN sender TEXT DEFAULT 'bot'").run(); } catch (e) {}
 
 // Seed some initial data
 const insertService = db.prepare('INSERT INTO services (id, service_name, estimated_minutes, color_code, is_active) VALUES (?, ?, ?, ?, ?)');
@@ -523,6 +544,14 @@ app.get("/api/tts", async (req, res) => {
   }
 });
 
+app.get("/youtube-cover.jpg", (req, res) => {
+  const filePath = path.join(process.cwd(), "public", "youtube-cover.jpg");
+  if (req.query.download === "1") {
+    return res.download(filePath, "ai-smart-q-connect-youtube-cover.jpg");
+  }
+  return res.sendFile(filePath);
+});
+
 app.post("/api/admin/seed-demo-data", (req, res) => {
   try {
     const count = seedRealisticAnalyticsData(true);
@@ -704,46 +733,154 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
     text = `📣 ประกาศเรียกคิวรับบริการ! (AI Smart Q Connect • รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n• ชื่อคนไข้: ${queue.full_name}\n👉 กรุณาเข้าพบเจ้าหน้าที่ ณ จุดคัดกรองหรือห้องตรวจทันทีค่ะ`;
   } else if (action === 'Completed') {
     const liffRecord = db.prepare("SELECT value FROM system_settings WHERE key = 'line_liff_id'").get() as any;
-    const liffId = liffRecord?.value;
+    const liffId = liffRecord?.value?.trim();
+    const baseUrl = (detectedAppUrl || process.env.APP_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
+    const getRateUrl = (score: number) =>
+      liffId
+        ? `https://liff.line.me/${liffId}?rate=${score}&qid=${encodeURIComponent(queue.id)}`
+        : `${baseUrl}/?rate=${score}&qid=${encodeURIComponent(queue.id)}`;
+
+    if (queue.line_uid && String(queue.line_uid).trim() !== '') {
+      try {
+        db.prepare(`
+          INSERT OR REPLACE INTO line_pending_reviews (line_uid, queue_id, stage, updated_at)
+          VALUES (?, ?, 'awaiting_rating', ?)
+        `).run(String(queue.line_uid).trim(), queue.id, getThailandTimeStr());
+      } catch (e) {
+        console.error('Failed to record line_pending_reviews:', e);
+      }
+    }
+
     text = `✅ บริการเสร็จสิ้นเรียบร้อย (AI Smart Q Connect • รพ.สต.อัจฉริยะ)
 • หมายเลขคิว: ${queue.queue_number}
 • บริการ: ${queue.service_name}
 👉 รพ.สต. ขอขอบพระคุณที่เข้ารับบริการ ขอให้ท่านมีสุขภาพแข็งแรง ปราศจากโรคภัยค่ะ
 
-🌟 โปรดประเมินความพึงพอใจการให้บริการด้านล่างนี้ค่ะ 👇`;
-    
-    if (liffId) {
-      lineMessages = [
-        {
-          type: 'text',
-          text,
-          quickReply: {
-            items: [
+🌟 กดให้ดาวด้านล่าง หรือพิมพ์รีวิวตอบกลับในแชทนี้ได้เลยค่ะ (เช่น "5 ดาว บริการดีมาก") 👇`;
+
+    const starButtons = [1, 2, 3, 4, 5].map((s) => ({
+      type: 'button',
+      style: 'secondary',
+      height: 'sm',
+      flex: 1,
+      margin: s === 1 ? 'none' : 'xs',
+      action: {
+        type: 'postback',
+        label: `${s}⭐`,
+        data: `action=rate&qid=${queue.id}&score=${s}`,
+        displayText: `ให้คะแนน ${s} ดาว`
+      }
+    }));
+
+    lineMessages = [
+      {
+        type: 'flex',
+        altText: `✅ คิว ${queue.queue_number} เสร็จสิ้นแล้ว — กรุณาให้คะแนนความพึงพอใจและเขียนรีวิว`,
+        contents: {
+          type: 'bubble',
+          size: 'mega',
+          header: {
+            type: 'box',
+            layout: 'vertical',
+            backgroundColor: '#0D9488',
+            paddingAll: '16px',
+            contents: [
               {
-                type: 'action',
-                action: { type: 'uri', label: '⭐⭐⭐⭐⭐', uri: `https://liff.line.me/${liffId}?rate=5&qid=${queue.id}` }
+                type: 'text',
+                text: '✅ บริการเสร็จสิ้นเรียบร้อย',
+                color: '#FFFFFF',
+                weight: 'bold',
+                size: 'md'
               },
               {
-                type: 'action',
-                action: { type: 'uri', label: '⭐⭐⭐⭐', uri: `https://liff.line.me/${liffId}?rate=4&qid=${queue.id}` }
+                type: 'text',
+                text: 'AI Smart Q Connect • รพ.สต.อัจฉริยะ',
+                color: '#CCFBF1',
+                size: 'xs',
+                margin: 'xs'
+              }
+            ]
+          },
+          body: {
+            type: 'box',
+            layout: 'vertical',
+            spacing: 'sm',
+            paddingAll: '16px',
+            contents: [
+              {
+                type: 'box',
+                layout: 'horizontal',
+                contents: [
+                  { type: 'text', text: 'หมายเลขคิว', size: 'xs', color: '#64748B', flex: 2 },
+                  { type: 'text', text: String(queue.queue_number), size: 'sm', weight: 'bold', color: '#0F172A', align: 'end', flex: 3 }
+                ]
               },
               {
-                type: 'action',
-                action: { type: 'uri', label: '⭐⭐⭐', uri: `https://liff.line.me/${liffId}?rate=3&qid=${queue.id}` }
+                type: 'box',
+                layout: 'horizontal',
+                contents: [
+                  { type: 'text', text: 'บริการ', size: 'xs', color: '#64748B', flex: 2 },
+                  { type: 'text', text: String(queue.service_name), size: 'sm', weight: 'bold', color: '#0F172A', align: 'end', flex: 3, wrap: true }
+                ]
+              },
+              { type: 'separator', margin: 'md' },
+              {
+                type: 'text',
+                text: '🌟 ให้คะแนนความพึงพอใจ (กดดาวในแชทหรือเปิดฟอร์มเขียนคอมเมนต์)',
+                size: 'xs',
+                color: '#334155',
+                wrap: true,
+                margin: 'md',
+                weight: 'bold'
               },
               {
-                type: 'action',
-                action: { type: 'uri', label: '⭐⭐', uri: `https://liff.line.me/${liffId}?rate=2&qid=${queue.id}` }
+                type: 'box',
+                layout: 'horizontal',
+                margin: 'sm',
+                contents: starButtons
               },
               {
-                type: 'action',
-                action: { type: 'uri', label: '⭐', uri: `https://liff.line.me/${liffId}?rate=1&qid=${queue.id}` }
+                type: 'text',
+                text: 'หรือพิมพ์ตอบกลับได้เลย เช่น "5 ดาว พยาบาลใจดีมาก"',
+                size: 'xxs',
+                color: '#64748B',
+                wrap: true,
+                margin: 'xs'
+              }
+            ]
+          },
+          footer: {
+            type: 'box',
+            layout: 'vertical',
+            spacing: 'sm',
+            paddingAll: '12px',
+            contents: [
+              {
+                type: 'button',
+                style: 'primary',
+                color: '#06C755',
+                height: 'sm',
+                action: {
+                  type: 'uri',
+                  label: '⭐ ให้ดาวและเขียนคอมเมนต์',
+                  uri: getRateUrl(0)
+                }
               }
             ]
           }
+        },
+        quickReply: {
+          items: [5, 4, 3, 2, 1].map((s) => ({
+            type: 'action',
+            action: {
+              type: 'uri',
+              label: '⭐'.repeat(s),
+              uri: getRateUrl(s)
+            }
+          }))
         }
-      ];
-    }
+      }
+    ];
   } else if (action === 'Skipped') {
     text = `⚠️ แจ้งเตือนการข้ามคิว (AI Smart Q Connect • รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n👉 เนื่องจากพยาบาลเรียกคิวแล้วไม่พบท่าน คิวจึงถูกข้ามชั่วคราว กรุณาติดต่อเคาน์เตอร์พยาบาลค่ะ`;
   } else if (action === 'No-show') {
@@ -764,8 +901,8 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
   const now = getThailandTimeStr();
   try {
     db.prepare(`
-      INSERT INTO line_logs (id, queue_id, queue_number, message, created_at)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO line_logs (id, queue_id, queue_number, message, sender, created_at)
+      VALUES (?, ?, ?, ?, 'bot', ?)
     `).run(logId, queue.id, queue.queue_number, text, now);
   } catch (dbErr) {
     console.error('Error inserting line_logs:', dbErr);
@@ -776,6 +913,7 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
     queue_id: queue.id,
     queue_number: queue.queue_number,
     message: text,
+    sender: 'bot',
     created_at: now
   };
 
@@ -1047,6 +1185,302 @@ app.post("/api/queues/:id/rate", (req, res) => {
     io.emit('queue_updated', updatedQueue);
   }
   res.json(updatedQueue);
+});
+
+function parseLineReviewText(rawText: string): { score: number | null; comment: string | null } {
+  const trimmed = rawText.trim();
+  if (!trimmed) return { score: null, comment: null };
+
+  // Match leading star emojis (e.g. "⭐⭐⭐⭐⭐ ดีมาก")
+  const starEmojiMatch = trimmed.match(/^(⭐{1,5})\s*(.*)$/s);
+  if (starEmojiMatch) {
+    const score = starEmojiMatch[1].length;
+    const comment = starEmojiMatch[2].trim() || null;
+    return { score, comment };
+  }
+
+  // Match explicit numeric rating prefix like "5 ดาว บริการดี", "5/5 บริการดี", "5 คะแนน ...", or "5 ..."
+  const numMatch = trimmed.match(/^([1-5])(?:\s*\/\s*5|\s*(?:ดาว|คะแนน))?(?:[\s:,\-]+(.*))?$/s);
+  if (numMatch) {
+    const score = parseInt(numMatch[1], 10);
+    const comment = (numMatch[2] || '').trim() || null;
+    return { score, comment };
+  }
+
+  return { score: null, comment: trimmed };
+}
+
+function recordLineLog(queueId: string | null, queueNumber: string | null, message: string, sender: 'bot' | 'user') {
+  const id = randomUUID();
+  const now = getThailandTimeStr();
+  try {
+    db.prepare(`
+      INSERT INTO line_logs (id, queue_id, queue_number, message, sender, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(id, queueId, queueNumber, message, sender, now);
+  } catch (e) {
+    console.error('Failed inserting line log:', e);
+  }
+  const io = app.get('io');
+  if (io) {
+    io.emit('line_notification', {
+      id,
+      queue_id: queueId,
+      queue_number: queueNumber,
+      message,
+      sender,
+      created_at: now
+    });
+  }
+}
+
+async function sendLineReply(replyToken: string, messages: any[]) {
+  if (!replyToken) return;
+  try {
+    const tokenRecord = db.prepare("SELECT value FROM system_settings WHERE key = 'line_channel_access_token'").get() as any;
+    const cat = tokenRecord?.value || process.env.LINE_CHANNEL_ACCESS_TOKEN || "";
+    if (!cat || cat.trim() === "") return;
+
+    const response = await fetch('https://api.line.me/v2/bot/message/reply', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${cat.trim()}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ replyToken, messages })
+    });
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      console.error('[LINE Webhook Reply Error]:', errData);
+    }
+  } catch (err) {
+    console.error('[LINE Webhook Reply Exception]:', err);
+  }
+}
+
+app.post("/api/line/webhook", async (req, res) => {
+  const events = Array.isArray(req.body?.events) ? req.body.events : [];
+  const io = app.get('io');
+
+  for (const event of events) {
+    try {
+      const userId = event?.source?.userId || "";
+      const replyToken = event?.replyToken || "";
+
+      if (event?.type === 'postback' && event?.postback?.data) {
+        const params = new URLSearchParams(event.postback.data);
+        const action = params.get('action');
+        const qid = params.get('qid') || "";
+
+        if (action === 'rate' && qid) {
+          const score = Number(params.get('score'));
+          const existing = db.prepare('SELECT id, queue_number, completed_at, satisfaction_comment FROM queues WHERE id = ?').get(qid) as any;
+          if (existing && Number.isInteger(score) && score >= 1 && score <= 5) {
+            const completedAt = existing.completed_at || getThailandTimeStr();
+            db.prepare('UPDATE queues SET satisfaction_score = ?, completed_at = ? WHERE id = ?')
+              .run(score, completedAt, qid);
+
+            const updatedQueue = getQueueDetails(qid);
+            if (io && updatedQueue) io.emit('queue_updated', updatedQueue);
+
+            if (userId) {
+              db.prepare(`
+                INSERT OR REPLACE INTO line_pending_reviews (line_uid, queue_id, stage, updated_at)
+                VALUES (?, ?, 'awaiting_comment', ?)
+              `).run(userId, qid, getThailandTimeStr());
+            }
+
+            const replyMsg = existing.satisfaction_comment
+              ? `🌟 ขอบคุณสำหรับการประเมิน ${score}/5 ดาว (คิว ${existing.queue_number}) พร้อมความคิดเห็น "${existing.satisfaction_comment}" ค่ะ สามารถพิมพ์แก้ไขความคิดเห็นเพิ่มเติมได้นะคะ`
+              : `🌟 บันทึกคะแนน ${score}/5 ดาว สำหรับคิว ${existing.queue_number} เรียบร้อยแล้วค่ะ!\n💬 ท่านสามารถพิมพ์ข้อเสนอแนะหรือคำติชมตอบกลับในแชทนี้ได้เลยนะคะ`;
+
+            recordLineLog(qid, existing.queue_number, replyMsg, 'bot');
+            await sendLineReply(replyToken, [
+              {
+                type: 'text',
+                text: replyMsg,
+                quickReply: {
+                  items: [
+                    {
+                      type: 'action',
+                      action: {
+                        type: 'postback',
+                        label: 'ไม่ระบุคอมเมนต์',
+                        data: `action=skip_comment&qid=${qid}`,
+                        displayText: 'ไม่ระบุคอมเมนต์'
+                      }
+                    }
+                  ]
+                }
+              }
+            ]);
+          }
+        } else if (action === 'skip_comment') {
+          if (userId) {
+            db.prepare('DELETE FROM line_pending_reviews WHERE line_uid = ?').run(userId);
+          }
+          const thanksMsg = '🙏 ขอบพระคุณสำหรับคะแนนประเมินค่ะ ขอให้ท่านมีสุขภาพแข็งแรงนะคะ';
+          recordLineLog(qid || null, null, thanksMsg, 'bot');
+          await sendLineReply(replyToken, [{ type: 'text', text: thanksMsg }]);
+        }
+      } else if (event?.type === 'message' && event?.message?.type === 'text') {
+        const rawText = String(event.message.text || '').trim();
+        if (!rawText) continue;
+
+        let targetQueueId: string | null = null;
+        let pendingStage: string | null = null;
+
+        if (userId) {
+          const pending = db.prepare('SELECT queue_id, stage FROM line_pending_reviews WHERE line_uid = ?').get(userId) as any;
+          if (pending?.queue_id) {
+            targetQueueId = pending.queue_id;
+            pendingStage = pending.stage;
+          } else {
+            const latestQueue = db.prepare(`
+              SELECT q.id FROM queues q
+              JOIN users u ON q.patient_id = u.id
+              WHERE u.line_uid = ? AND q.status = 'Completed'
+              ORDER BY COALESCE(q.completed_at, q.created_at) DESC
+              LIMIT 1
+            `).get(userId) as any;
+            if (latestQueue?.id) {
+              targetQueueId = latestQueue.id;
+              pendingStage = 'fallback';
+            }
+          }
+        }
+
+        if (!targetQueueId) continue;
+
+        const existing = db.prepare('SELECT id, queue_number, completed_at, satisfaction_score, satisfaction_comment FROM queues WHERE id = ?').get(targetQueueId) as any;
+        if (!existing) continue;
+
+        const parsed = parseLineReviewText(rawText);
+        if (pendingStage === 'fallback' && parsed.score === null) {
+          continue;
+        }
+
+        recordLineLog(existing.id, existing.queue_number, rawText, 'user');
+
+        const finalScore = parsed.score ?? existing.satisfaction_score;
+        const finalComment = parsed.comment !== null ? parsed.comment : existing.satisfaction_comment;
+        const completedAt = existing.completed_at || getThailandTimeStr();
+
+        if (finalScore && Number.isInteger(finalScore) && finalScore >= 1 && finalScore <= 5) {
+          db.prepare('UPDATE queues SET satisfaction_score = ?, satisfaction_comment = ?, completed_at = ? WHERE id = ?')
+            .run(finalScore, finalComment || null, completedAt, existing.id);
+
+          const updatedQueue = getQueueDetails(existing.id);
+          if (io && updatedQueue) io.emit('queue_updated', updatedQueue);
+
+          if (userId) {
+            db.prepare('DELETE FROM line_pending_reviews WHERE line_uid = ?').run(userId);
+          }
+
+          const replyMsg = finalComment
+            ? `🙏 ขอบพระคุณสำหรับรีวิวคิว ${existing.queue_number} ค่ะ!\n⭐ คะแนน: ${finalScore}/5 ดาว\n💬 ความคิดเห็น: "${finalComment}"`
+            : `🙏 ขอบพระคุณสำหรับการประเมิน ${finalScore}/5 ดาว สำหรับคิว ${existing.queue_number} ค่ะ\n💬 สามารถพิมพ์ความคิดเห็นเพิ่มเติมต่อได้เลยนะคะ`;
+
+          recordLineLog(existing.id, existing.queue_number, replyMsg, 'bot');
+          await sendLineReply(replyToken, [{ type: 'text', text: replyMsg }]);
+        } else if (parsed.comment) {
+          db.prepare('UPDATE queues SET satisfaction_comment = ?, completed_at = ? WHERE id = ?')
+            .run(parsed.comment, completedAt, existing.id);
+
+          const updatedQueue = getQueueDetails(existing.id);
+          if (io && updatedQueue) io.emit('queue_updated', updatedQueue);
+
+          const promptStarsMsg = `💬 บันทึกความคิดเห็น "${parsed.comment}" เรียบร้อยค่ะ\n🌟 รบกวนกดเลือกดาวด้านล่าง (1-5 ดาว) เพื่อบันทึกคะแนนให้ครบถ้วนนะคะ`;
+          recordLineLog(existing.id, existing.queue_number, promptStarsMsg, 'bot');
+          await sendLineReply(replyToken, [
+            {
+              type: 'text',
+              text: promptStarsMsg,
+              quickReply: {
+                items: [5, 4, 3, 2, 1].map((s) => ({
+                  type: 'action',
+                  action: {
+                    type: 'postback',
+                    label: `${s}⭐`,
+                    data: `action=rate&qid=${existing.id}&score=${s}`,
+                    displayText: `ให้คะแนน ${s} ดาว`
+                  }
+                }))
+              }
+            }
+          ]);
+        }
+      }
+    } catch (eventErr) {
+      console.error('[LINE Webhook Event Error]:', eventErr);
+    }
+  }
+
+  return res.status(200).json({ status: 'ok' });
+});
+
+app.post("/api/line/simulate-reply", (req, res) => {
+  const rawText = String(req.body?.text || '').trim();
+  let queueId = req.body?.queue_id ? String(req.body.queue_id) : '';
+
+  if (!rawText) {
+    return res.status(400).json({ error: 'กรุณาพิมพ์ข้อความหรือรีวิว' });
+  }
+
+  if (!queueId) {
+    const latestCompleted = db.prepare(`
+      SELECT id FROM queues
+      WHERE status = 'Completed'
+      ORDER BY COALESCE(completed_at, created_at) DESC
+      LIMIT 1
+    `).get() as any;
+    queueId = latestCompleted?.id || '';
+  }
+
+  if (!queueId) {
+    return res.status(404).json({ error: 'ยังไม่มีคิวที่เสร็จสิ้นสำหรับให้คะแนนรีวิว' });
+  }
+
+  const existing = db.prepare('SELECT id, queue_number, completed_at, satisfaction_score, satisfaction_comment FROM queues WHERE id = ?').get(queueId) as any;
+  if (!existing) {
+    return res.status(404).json({ error: 'ไม่พบคิวที่ระบุ' });
+  }
+
+  recordLineLog(existing.id, existing.queue_number, rawText, 'user');
+
+  const parsed = parseLineReviewText(rawText);
+  const finalScore = parsed.score ?? existing.satisfaction_score;
+  const finalComment = parsed.comment !== null ? parsed.comment : existing.satisfaction_comment;
+  const completedAt = existing.completed_at || getThailandTimeStr();
+  const io = app.get('io');
+
+  if (finalScore && Number.isInteger(finalScore) && finalScore >= 1 && finalScore <= 5) {
+    db.prepare('UPDATE queues SET satisfaction_score = ?, satisfaction_comment = ?, completed_at = ? WHERE id = ?')
+      .run(finalScore, finalComment || null, completedAt, existing.id);
+
+    const updatedQueue = getQueueDetails(existing.id);
+    if (io && updatedQueue) io.emit('queue_updated', updatedQueue);
+
+    const replyMsg = finalComment
+      ? `🙏 ขอบพระคุณสำหรับรีวิวคิว ${existing.queue_number} ค่ะ!\n⭐ คะแนน: ${finalScore}/5 ดาว\n💬 ความคิดเห็น: "${finalComment}"`
+      : `🙏 ขอบพระคุณสำหรับการประเมิน ${finalScore}/5 ดาว สำหรับคิว ${existing.queue_number} ค่ะ`;
+    recordLineLog(existing.id, existing.queue_number, replyMsg, 'bot');
+
+    return res.json({ success: true, queue: updatedQueue, score: finalScore, comment: finalComment });
+  }
+
+  if (parsed.comment) {
+    db.prepare('UPDATE queues SET satisfaction_comment = ?, completed_at = ? WHERE id = ?')
+      .run(parsed.comment, completedAt, existing.id);
+    const updatedQueue = getQueueDetails(existing.id);
+    if (io && updatedQueue) io.emit('queue_updated', updatedQueue);
+
+    const replyMsg = `💬 บันทึกความคิดเห็น "${parsed.comment}" แล้วค่ะ รบกวนระบุคะแนนดาวด้วยนะคะ (เช่น "5 ดาว" หรือกดดาวด้านบน)`;
+    recordLineLog(existing.id, existing.queue_number, replyMsg, 'bot');
+    return res.json({ success: true, queue: updatedQueue, needsScore: true });
+  }
+
+  return res.json({ success: true });
 });
 
 app.get("/api/settings", (req, res) => {

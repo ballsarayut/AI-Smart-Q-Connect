@@ -22,6 +22,8 @@ export default function LineSimulator() {
   const [showSettings, setShowSettings] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [chatReplyText, setChatReplyText] = useState('');
+  const [isSendingReply, setIsSendingReply] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Sound generator
@@ -138,6 +140,45 @@ export default function LineSimulator() {
       toast.error('เกิดข้อผิดพลาดในการส่งผลประเมิน');
     } finally {
       setSubmittingId(null);
+    }
+  };
+
+  const submitChatReply = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = chatReplyText.trim();
+    if (!trimmed || isSendingReply) return;
+
+    const latestCompletedMsg = [...messages]
+      .reverse()
+      .find((m) => m.queue_id && typeof m.message === 'string' && m.message.includes('บริการเสร็จสิ้นเรียบร้อย'));
+
+    setIsSendingReply(true);
+    try {
+      const res = await fetch('/api/line/simulate-reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: trimmed,
+          queue_id: latestCompletedMsg?.queue_id || undefined
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || 'ไม่สามารถส่งข้อความรีวิวได้');
+      } else {
+        setChatReplyText('');
+        if (data.queue?.id && data.score) {
+          setRatedQueues((prev) => ({
+            ...prev,
+            [data.queue.id]: { score: data.score, comment: data.comment }
+          }));
+          toast.success(`บันทึกคะแนน ${data.score}/5 ดาว พร้อมรีวิวเรียบร้อย!`);
+        }
+      }
+    } catch {
+      toast.error('เกิดข้อผิดพลาดในการส่งข้อความ');
+    } finally {
+      setIsSendingReply(false);
     }
   };
 
@@ -344,6 +385,19 @@ export default function LineSimulator() {
                       const existingRating = msg.queue_id ? ratedQueues[msg.queue_id] : undefined;
                       const selectedDraftScore = msg.queue_id ? (draftScores[msg.queue_id] || 0) : 0;
 
+                      const isUserMessage = msg.sender === 'user';
+
+                      if (isUserMessage) {
+                        return (
+                          <div key={msg.id || index} className="flex flex-col items-end animate-in fade-in slide-in-from-bottom-2 duration-300">
+                            <div className="bg-[#8DE055] text-slate-900 px-3.5 py-2.5 rounded-[18px] rounded-tr-none text-xs leading-relaxed whitespace-pre-wrap font-medium shadow-sm max-w-[78%] font-sans">
+                              {msg.message}
+                            </div>
+                            <span className="text-[9px] text-white/60 font-bold mt-1 pr-1">{time} น.</span>
+                          </div>
+                        );
+                      }
+
                       return (
                         <div key={msg.id || index} className="flex items-start gap-2.5 animate-in fade-in slide-in-from-bottom-2 duration-300">
                           {/* Bot Rounded Icon Avatar */}
@@ -431,6 +485,26 @@ export default function LineSimulator() {
                   )}
                   <div ref={chatEndRef} />
                 </div>
+
+                {/* Chat Reply Input Bar */}
+                <form onSubmit={submitChatReply} className="bg-white border-t border-slate-200 px-3 py-2 flex items-center gap-2 shrink-0">
+                  <input
+                    type="text"
+                    value={chatReplyText}
+                    onChange={(e) => setChatReplyText(e.target.value)}
+                    placeholder='พิมพ์รีวิว เช่น "5 ดาว บริการดีมาก"...'
+                    maxLength={160}
+                    className="flex-1 bg-slate-100 border border-slate-200 rounded-full px-3.5 py-1.5 text-xs text-slate-800 outline-none focus:border-[#06C755]"
+                  />
+                  <button
+                    type="submit"
+                    disabled={isSendingReply || !chatReplyText.trim()}
+                    className="p-2 rounded-full bg-[#06C755] hover:bg-[#05b04b] text-white transition-colors disabled:opacity-40 cursor-pointer shrink-0"
+                    title="ส่งข้อความรีวิว"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                  </button>
+                </form>
               </div>
             )}
           </div>
