@@ -700,6 +700,143 @@ function generateQueueNumber(serviceId: string, isFastTrack: boolean = false) {
   return `${prefix}${num}`;
 }
 
+function buildCompletedRatingLinePayload(queue: any) {
+  const text = `✅ บริการเสร็จสิ้นเรียบร้อย (AI Smart Q Connect • รพ.สต.อัจฉริยะ)
+• หมายเลขคิว: ${queue.queue_number}
+• บริการ: ${queue.service_name}
+👉 รพ.สต. ขอขอบพระคุณที่เข้ารับบริการ ขอให้ท่านมีสุขภาพแข็งแรง ปราศจากโรคภัยค่ะ
+
+🌟 กดให้ดาวด้านล่าง หรือพิมพ์รีวิวตอบกลับในแชทนี้ได้เลยค่ะ (เช่น "5 ดาว บริการดีมาก") 👇`;
+
+  const starButtons = [1, 2, 3, 4, 5].map((s) => ({
+    type: 'button',
+    style: 'secondary',
+    height: 'sm',
+    flex: 1,
+    margin: s === 1 ? 'none' : 'xs',
+    action: {
+      type: 'postback',
+      label: `${s}⭐`,
+      data: `action=rate&qid=${queue.id}&score=${s}`,
+      displayText: `ให้คะแนน ${s} ดาว`
+    }
+  }));
+
+  const lineMessages = [
+    {
+      type: 'flex',
+      altText: `✅ คิว ${queue.queue_number} เสร็จสิ้นแล้ว — กรุณากดให้ดาวและพิมพ์รีวิวในแชท LINE`,
+      contents: {
+        type: 'bubble',
+        size: 'mega',
+        header: {
+          type: 'box',
+          layout: 'vertical',
+          backgroundColor: '#0D9488',
+          paddingAll: '16px',
+          contents: [
+            {
+              type: 'text',
+              text: '✅ บริการเสร็จสิ้นเรียบร้อย',
+              color: '#FFFFFF',
+              weight: 'bold',
+              size: 'md'
+            },
+            {
+              type: 'text',
+              text: 'AI Smart Q Connect • รพ.สต.อัจฉริยะ',
+              color: '#CCFBF1',
+              size: 'xs',
+              margin: 'xs'
+            }
+          ]
+        },
+        body: {
+          type: 'box',
+          layout: 'vertical',
+          spacing: 'sm',
+          paddingAll: '16px',
+          contents: [
+            {
+              type: 'box',
+              layout: 'horizontal',
+              contents: [
+                { type: 'text', text: 'หมายเลขคิว', size: 'xs', color: '#64748B', flex: 2 },
+                { type: 'text', text: String(queue.queue_number), size: 'sm', weight: 'bold', color: '#0F172A', align: 'end', flex: 3 }
+              ]
+            },
+            {
+              type: 'box',
+              layout: 'horizontal',
+              contents: [
+                { type: 'text', text: 'บริการ', size: 'xs', color: '#64748B', flex: 2 },
+                { type: 'text', text: String(queue.service_name), size: 'sm', weight: 'bold', color: '#0F172A', align: 'end', flex: 3, wrap: true }
+              ]
+            },
+            { type: 'separator', margin: 'md' },
+            {
+              type: 'text',
+              text: '🌟 กดให้ดาวความพึงพอใจในแชทนี้ได้เลย',
+              size: 'xs',
+              color: '#334155',
+              wrap: true,
+              margin: 'md',
+              weight: 'bold'
+            },
+            {
+              type: 'box',
+              layout: 'horizontal',
+              margin: 'sm',
+              contents: starButtons
+            },
+            {
+              type: 'text',
+              text: 'หรือพิมพ์คะแนนพร้อมความคิดเห็นส่งมาในแชทนี้ได้เลย เช่น "5 ดาว พยาบาลใจดีมาก"',
+              size: 'xxs',
+              color: '#64748B',
+              wrap: true,
+              margin: 'xs'
+            }
+          ]
+        },
+        footer: {
+          type: 'box',
+          layout: 'vertical',
+          spacing: 'sm',
+          paddingAll: '12px',
+          contents: [
+            {
+              type: 'button',
+              style: 'primary',
+              color: '#06C755',
+              height: 'sm',
+              action: {
+                type: 'postback',
+                label: '💬 เขียนความคิดเห็น / รีวิวในแชท',
+                data: `action=prompt_comment&qid=${queue.id}`,
+                displayText: 'เขียนความคิดเห็นเพิ่มเติม'
+              }
+            }
+          ]
+        }
+      },
+      quickReply: {
+        items: [5, 4, 3, 2, 1].map((s) => ({
+          type: 'action',
+          action: {
+            type: 'postback',
+            label: '⭐'.repeat(s),
+            data: `action=rate&qid=${queue.id}&score=${s}`,
+            displayText: `ให้คะแนน ${s} ดาว`
+          }
+        }))
+      }
+    }
+  ];
+
+  return { text, lineMessages };
+}
+
 // Trigger LINE notification (simulated + real if token is provided)
 async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' | 'Completed' | 'Skipped' | 'No-show' | 'Approaching' | 'Approaching_1hr') {
   if (!queue) return;
@@ -707,7 +844,6 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
   // Get map link from settings
   const mapLinkRecord = db.prepare("SELECT value FROM system_settings WHERE key = 'hospital_map_link'").get() as any;
   const mapLink = mapLinkRecord?.value || "";
-
   let text = "";
   const timeStr = new Date(queue.created_at).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' });
   let lineMessages: any[] = [];
@@ -743,138 +879,9 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
       }
     }
 
-    text = `✅ บริการเสร็จสิ้นเรียบร้อย (AI Smart Q Connect • รพ.สต.อัจฉริยะ)
-• หมายเลขคิว: ${queue.queue_number}
-• บริการ: ${queue.service_name}
-👉 รพ.สต. ขอขอบพระคุณที่เข้ารับบริการ ขอให้ท่านมีสุขภาพแข็งแรง ปราศจากโรคภัยค่ะ
-
-🌟 กดให้ดาวด้านล่าง หรือพิมพ์รีวิวตอบกลับในแชทนี้ได้เลยค่ะ (เช่น "5 ดาว บริการดีมาก") 👇`;
-
-    const starButtons = [1, 2, 3, 4, 5].map((s) => ({
-      type: 'button',
-      style: 'secondary',
-      height: 'sm',
-      flex: 1,
-      margin: s === 1 ? 'none' : 'xs',
-      action: {
-        type: 'postback',
-        label: `${s}⭐`,
-        data: `action=rate&qid=${queue.id}&score=${s}`,
-        displayText: `ให้คะแนน ${s} ดาว`
-      }
-    }));
-
-    lineMessages = [
-      {
-        type: 'flex',
-        altText: `✅ คิว ${queue.queue_number} เสร็จสิ้นแล้ว — กรุณากดให้ดาวและพิมพ์รีวิวในแชท LINE`,
-        contents: {
-          type: 'bubble',
-          size: 'mega',
-          header: {
-            type: 'box',
-            layout: 'vertical',
-            backgroundColor: '#0D9488',
-            paddingAll: '16px',
-            contents: [
-              {
-                type: 'text',
-                text: '✅ บริการเสร็จสิ้นเรียบร้อย',
-                color: '#FFFFFF',
-                weight: 'bold',
-                size: 'md'
-              },
-              {
-                type: 'text',
-                text: 'AI Smart Q Connect • รพ.สต.อัจฉริยะ',
-                color: '#CCFBF1',
-                size: 'xs',
-                margin: 'xs'
-              }
-            ]
-          },
-          body: {
-            type: 'box',
-            layout: 'vertical',
-            spacing: 'sm',
-            paddingAll: '16px',
-            contents: [
-              {
-                type: 'box',
-                layout: 'horizontal',
-                contents: [
-                  { type: 'text', text: 'หมายเลขคิว', size: 'xs', color: '#64748B', flex: 2 },
-                  { type: 'text', text: String(queue.queue_number), size: 'sm', weight: 'bold', color: '#0F172A', align: 'end', flex: 3 }
-                ]
-              },
-              {
-                type: 'box',
-                layout: 'horizontal',
-                contents: [
-                  { type: 'text', text: 'บริการ', size: 'xs', color: '#64748B', flex: 2 },
-                  { type: 'text', text: String(queue.service_name), size: 'sm', weight: 'bold', color: '#0F172A', align: 'end', flex: 3, wrap: true }
-                ]
-              },
-              { type: 'separator', margin: 'md' },
-              {
-                type: 'text',
-                text: '🌟 กดให้ดาวความพึงพอใจในแชทนี้ได้เลย',
-                size: 'xs',
-                color: '#334155',
-                wrap: true,
-                margin: 'md',
-                weight: 'bold'
-              },
-              {
-                type: 'box',
-                layout: 'horizontal',
-                margin: 'sm',
-                contents: starButtons
-              },
-              {
-                type: 'text',
-                text: 'หรือพิมพ์คะแนนพร้อมความคิดเห็นส่งมาในแชทนี้ได้เลย เช่น "5 ดาว พยาบาลใจดีมาก"',
-                size: 'xxs',
-                color: '#64748B',
-                wrap: true,
-                margin: 'xs'
-              }
-            ]
-          },
-          footer: {
-            type: 'box',
-            layout: 'vertical',
-            spacing: 'sm',
-            paddingAll: '12px',
-            contents: [
-              {
-                type: 'button',
-                style: 'primary',
-                color: '#06C755',
-                height: 'sm',
-                action: {
-                  type: 'postback',
-                  label: '💬 เขียนความคิดเห็น / รีวิวในแชท',
-                  data: `action=prompt_comment&qid=${queue.id}`,
-                  displayText: 'เขียนความคิดเห็นเพิ่มเติม'
-                }
-              }
-            ]
-          }
-        },
-        quickReply: {
-          items: [5, 4, 3, 2, 1].map((s) => ({
-            type: 'action',
-            action: {
-              type: 'postback',
-              label: '⭐'.repeat(s),
-              data: `action=rate&qid=${queue.id}&score=${s}`,
-              displayText: `ให้คะแนน ${s} ดาว`
-            }
-          }))
-        }
-      }
-    ];
+    const built = buildCompletedRatingLinePayload(queue);
+    text = built.text;
+    lineMessages = built.lineMessages;
   } else if (action === 'Skipped') {
     text = `⚠️ แจ้งเตือนการข้ามคิว (AI Smart Q Connect • รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n👉 เนื่องจากพยาบาลเรียกคิวแล้วไม่พบท่าน คิวจึงถูกข้ามชั่วคราว กรุณาติดต่อเคาน์เตอร์พยาบาลค่ะ`;
   } else if (action === 'No-show') {
@@ -1625,6 +1632,80 @@ app.post("/api/settings/test-line", async (req, res) => {
     }
     
     return res.json({ success: true, message: "ระบบได้ส่งข้อความทดสอบไปยัง LINE ของคุณแล้ว" });
+  } catch (err: any) {
+    return res.status(500).json({ error: `Server error: ${err.message}` });
+  }
+});
+
+app.post("/api/settings/test-line-rating", async (req, res) => {
+  try {
+    const tokenRecord = db.prepare("SELECT value FROM system_settings WHERE key = 'line_channel_access_token'").get() as any;
+    const adminRecord = db.prepare("SELECT value FROM system_settings WHERE key = 'line_admin_uid'").get() as any;
+    const cat = String(req.body?.cat || tokenRecord?.value || process.env.LINE_CHANNEL_ACCESS_TOKEN || '').trim();
+    const uid = String(req.body?.uid || adminRecord?.value || '').trim();
+
+    if (!cat || !uid) {
+      return res.status(400).json({ error: "กรุณาระบุ Channel Access Token และ Admin User ID ก่อนส่งการ์ดให้ดาวทดสอบ" });
+    }
+
+    // Persist credentials so follow-up webhook clicks work seamlessly
+    db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('line_channel_access_token', ?)").run(cat);
+    db.prepare("INSERT OR REPLACE INTO system_settings (key, value) VALUES ('line_admin_uid', ?)").run(uid);
+
+    // Ensure there is a real Completed queue associated with this test for rating & analytics
+    const now = getThailandTimeStr();
+    let user = db.prepare('SELECT id FROM users WHERE line_uid = ?').get(uid) as any;
+    if (!user) {
+      const userId = randomUUID();
+      db.prepare('INSERT INTO users (id, citizen_id, full_name, phone, line_uid, role) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(userId, '0000000000000', 'ผู้ทดสอบระบบรีวิว LINE', '0800000000', uid, 'patient');
+      user = { id: userId };
+    }
+
+    const queueId = randomUUID();
+    const queueNumber = generateQueueNumber('service_1', false);
+    db.prepare(`
+      INSERT INTO queues (id, queue_number, patient_id, service_id, booking_type, status, created_at, called_at, completed_at, appointment_date)
+      VALUES (?, ?, ?, 'service_1', 'Online', 'Completed', ?, ?, ?, ?)
+    `).run(queueId, queueNumber, user.id, now, now, now, now.split('T')[0]);
+
+    const testQueue = getQueueDetails(queueId);
+    const io = app.get('io');
+    if (io && testQueue) io.emit('queue_updated', testQueue);
+
+    db.prepare(`
+      INSERT OR REPLACE INTO line_pending_reviews (line_uid, queue_id, stage, updated_at)
+      VALUES (?, ?, 'awaiting_rating', ?)
+    `).run(uid, queueId, now);
+
+    const { text, lineMessages } = buildCompletedRatingLinePayload(testQueue);
+    recordLineLog(queueId, queueNumber, text, 'bot');
+
+    const response = await fetch('https://api.line.me/v2/bot/message/push', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${cat}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        to: uid,
+        messages: lineMessages
+      })
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      return res.status(response.status).json({
+        error: `LINE API Error: ${data.message || 'Unknown error'}`,
+        details: data.details || []
+      });
+    }
+
+    return res.json({
+      success: true,
+      queue_number: queueNumber,
+      message: `ส่งการ์ดให้ดาวและรีวิวสำหรับคิว ${queueNumber} ไปยัง LINE ของคุณแล้ว! ลองกดดาวหรือพิมพ์คอมเมนต์ในแชท LINE ได้เลย`
+    });
   } catch (err: any) {
     return res.status(500).json({ error: `Server error: ${err.message}` });
   }

@@ -220,6 +220,46 @@ export default function Admin() {
     }
   };
 
+  const handleTestLineRating = async () => {
+    const cleanToken = lineToken.trim();
+    const cleanAdmin = lineAdmin.trim();
+    if (!cleanToken || !cleanAdmin) {
+      setTestLineResult({ error: "โปรดระบุ LINE Channel Access Token และ Admin LINE User ID ก่อนส่งการ์ดให้ดาวทดสอบ" });
+      return;
+    }
+
+    setTestLineLoading(true);
+    setTestLineResult(null);
+    try {
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          line_channel_access_token: cleanToken,
+          line_liff_id: lineLiffId.trim(),
+          line_admin_uid: cleanAdmin,
+          line_enable_broadcast: lineEnableBroadcast
+        })
+      });
+
+      const res = await fetch('/api/settings/test-line-rating', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cat: cleanToken, uid: cleanAdmin })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setTestLineResult({ error: data.error });
+      } else {
+        setTestLineResult({ success: true, message: data.message });
+      }
+    } catch (err: any) {
+      setTestLineResult({ error: err?.message || "ไม่สามารถส่งการ์ดให้ดาวได้" });
+    } finally {
+      setTestLineLoading(false);
+    }
+  };
+
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
@@ -739,14 +779,24 @@ export default function Admin() {
                 </div>
                 <div>
                   <div className="mt-4 flex flex-col items-start gap-2">
-                    <button
-                      type="button"
-                      onClick={handleTestLine}
-                      disabled={testLineLoading}
-                      className="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-xl font-bold text-xs uppercase tracking-widest transition-all disabled:opacity-50"
-                    >
-                      {testLineLoading ? "กำลังทดสอบ..." : "ทดสอบส่งการแจ้งเตือนไปที่ Admin"}
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={handleTestLine}
+                        disabled={testLineLoading}
+                        className="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-xl font-bold text-xs uppercase tracking-widest transition-all disabled:opacity-50 cursor-pointer"
+                      >
+                        {testLineLoading ? "กำลังส่ง..." : "ทดสอบส่งการแจ้งเตือนไปที่ Admin"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleTestLineRating}
+                        disabled={testLineLoading}
+                        className="bg-teal-600 hover:bg-teal-700 text-white px-5 py-2.5 rounded-xl font-bold text-xs uppercase tracking-widest transition-all disabled:opacity-50 cursor-pointer"
+                      >
+                        {testLineLoading ? "กำลังส่ง..." : "ทดสอบส่งการ์ดให้ดาวรีวิวไปที่ LINE"}
+                      </button>
+                    </div>
                     {testLineResult && (
                       <div className={`p-4 rounded-xl text-xs font-medium border ${testLineResult.success ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'} w-full mt-2 animate-in fade-in zoom-in duration-300`}>
                         {testLineResult.success ? (
