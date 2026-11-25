@@ -732,14 +732,6 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
   } else if (action === 'Calling') {
     text = `📣 ประกาศเรียกคิวรับบริการ! (AI Smart Q Connect • รพ.สต.อัจฉริยะ)\n• หมายเลขคิว: ${queue.queue_number}\n• บริการ: ${queue.service_name}\n• ชื่อคนไข้: ${queue.full_name}\n👉 กรุณาเข้าพบเจ้าหน้าที่ ณ จุดคัดกรองหรือห้องตรวจทันทีค่ะ`;
   } else if (action === 'Completed') {
-    const liffRecord = db.prepare("SELECT value FROM system_settings WHERE key = 'line_liff_id'").get() as any;
-    const liffId = liffRecord?.value?.trim();
-    const baseUrl = (detectedAppUrl || process.env.APP_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
-    const getRateUrl = (score: number) =>
-      liffId
-        ? `https://liff.line.me/${liffId}?rate=${score}&qid=${encodeURIComponent(queue.id)}`
-        : `${baseUrl}/?rate=${score}&qid=${encodeURIComponent(queue.id)}`;
-
     if (queue.line_uid && String(queue.line_uid).trim() !== '') {
       try {
         db.prepare(`
@@ -775,7 +767,7 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
     lineMessages = [
       {
         type: 'flex',
-        altText: `✅ คิว ${queue.queue_number} เสร็จสิ้นแล้ว — กรุณาให้คะแนนความพึงพอใจและเขียนรีวิว`,
+        altText: `✅ คิว ${queue.queue_number} เสร็จสิ้นแล้ว — กรุณากดให้ดาวและพิมพ์รีวิวในแชท LINE`,
         contents: {
           type: 'bubble',
           size: 'mega',
@@ -826,7 +818,7 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
               { type: 'separator', margin: 'md' },
               {
                 type: 'text',
-                text: '🌟 ให้คะแนนความพึงพอใจ (กดดาวในแชทหรือเปิดฟอร์มเขียนคอมเมนต์)',
+                text: '🌟 กดให้ดาวความพึงพอใจในแชทนี้ได้เลย',
                 size: 'xs',
                 color: '#334155',
                 wrap: true,
@@ -841,7 +833,7 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
               },
               {
                 type: 'text',
-                text: 'หรือพิมพ์ตอบกลับได้เลย เช่น "5 ดาว พยาบาลใจดีมาก"',
+                text: 'หรือพิมพ์คะแนนพร้อมความคิดเห็นส่งมาในแชทนี้ได้เลย เช่น "5 ดาว พยาบาลใจดีมาก"',
                 size: 'xxs',
                 color: '#64748B',
                 wrap: true,
@@ -861,9 +853,10 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
                 color: '#06C755',
                 height: 'sm',
                 action: {
-                  type: 'uri',
-                  label: '⭐ ให้ดาวและเขียนคอมเมนต์',
-                  uri: getRateUrl(0)
+                  type: 'postback',
+                  label: '💬 เขียนความคิดเห็น / รีวิวในแชท',
+                  data: `action=prompt_comment&qid=${queue.id}`,
+                  displayText: 'เขียนความคิดเห็นเพิ่มเติม'
                 }
               }
             ]
@@ -873,9 +866,10 @@ async function triggerLineNotification(queue: any, action: 'Booked' | 'Calling' 
           items: [5, 4, 3, 2, 1].map((s) => ({
             type: 'action',
             action: {
-              type: 'uri',
+              type: 'postback',
               label: '⭐'.repeat(s),
-              uri: getRateUrl(s)
+              data: `action=rate&qid=${queue.id}&score=${s}`,
+              displayText: `ให้คะแนน ${s} ดาว`
             }
           }))
         }
@@ -1315,6 +1309,43 @@ app.post("/api/line/webhook", async (req, res) => {
               }
             ]);
           }
+        } else if (action === 'prompt_comment' && qid) {
+          const existing = db.prepare('SELECT id, queue_number, satisfaction_score FROM queues WHERE id = ?').get(qid) as any;
+          if (existing) {
+            if (userId) {
+              db.prepare(`
+                INSERT OR REPLACE INTO line_pending_reviews (line_uid, queue_id, stage, updated_at)
+                VALUES (?, ?, ?, ?)
+              `).run(userId, qid, existing.satisfaction_score ? 'awaiting_comment' : 'awaiting_rating', getThailandTimeStr());
+            }
+
+            const promptMsg = existing.satisfaction_score
+              ? `💬 เชิญพิมพ์ความคิดเห็นเพิ่มเติมสำหรับคิว ${existing.queue_number} (คะแนน ${existing.satisfaction_score}/5 ดาว) ในแชทนี้ได้เลยค่ะ`
+              : `💬 เชิญพิมพ์ความคิดเห็นหรือข้อเสนอแนะสำหรับคิว ${existing.queue_number} ในแชทนี้ได้เลยค่ะ (หรือพิมพ์พร้อมดาว เช่น "5 ดาว บริการดีมาก")`;
+
+            recordLineLog(qid, existing.queue_number, promptMsg, 'bot');
+            await sendLineReply(replyToken, [
+              {
+                type: 'text',
+                text: promptMsg,
+                ...(existing.satisfaction_score
+                  ? {}
+                  : {
+                      quickReply: {
+                        items: [5, 4, 3, 2, 1].map((s) => ({
+                          type: 'action',
+                          action: {
+                            type: 'postback',
+                            label: '⭐'.repeat(s),
+                            data: `action=rate&qid=${qid}&score=${s}`,
+                            displayText: `ให้คะแนน ${s} ดาว`
+                          }
+                        }))
+                      }
+                    })
+              }
+            ]);
+          }
         } else if (action === 'skip_comment') {
           if (userId) {
             db.prepare('DELETE FROM line_pending_reviews WHERE line_uid = ?').run(userId);
@@ -1327,6 +1358,7 @@ app.post("/api/line/webhook", async (req, res) => {
         const rawText = String(event.message.text || '').trim();
         if (!rawText) continue;
 
+        const parsed = parseLineReviewText(rawText);
         let targetQueueId: string | null = null;
         let pendingStage: string | null = null;
 
@@ -1346,6 +1378,17 @@ app.post("/api/line/webhook", async (req, res) => {
             if (latestQueue?.id) {
               targetQueueId = latestQueue.id;
               pendingStage = 'fallback';
+            } else if (parsed.score !== null) {
+              const latestCompletedAny = db.prepare(`
+                SELECT id FROM queues
+                WHERE status = 'Completed'
+                ORDER BY COALESCE(completed_at, created_at) DESC
+                LIMIT 1
+              `).get() as any;
+              if (latestCompletedAny?.id) {
+                targetQueueId = latestCompletedAny.id;
+                pendingStage = 'explicit_star';
+              }
             }
           }
         }
@@ -1355,7 +1398,6 @@ app.post("/api/line/webhook", async (req, res) => {
         const existing = db.prepare('SELECT id, queue_number, completed_at, satisfaction_score, satisfaction_comment FROM queues WHERE id = ?').get(targetQueueId) as any;
         if (!existing) continue;
 
-        const parsed = parseLineReviewText(rawText);
         if (pendingStage === 'fallback' && parsed.score === null) {
           continue;
         }
