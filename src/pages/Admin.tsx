@@ -736,8 +736,9 @@ export default function Admin() {
                     <div className="text-[11px] text-slate-600">
                       <span className="font-bold text-slate-700">LIFF Endpoint URL: </span>
                       <span className="font-mono text-slate-800">{window.location.origin}/</span>
-                      <span className="block text-[10px] text-slate-500 mt-0.5">
-                        นำลิงก์นี้ไปตั้งเป็น Endpoint URL ใน LINE Developers Console &gt; LIFF และเปิด Scope: profile, openid (เปิดนอก iframe / แท็บใหม่เพื่อล็อกอินผ่าน LINE ได้ปกติ)
+                      <span className="block text-[10px] text-slate-500 mt-1 leading-relaxed">
+                        • นำลิงก์นี้ไปตั้งเป็น <b>Endpoint URL</b> ใน LINE Developers Console &gt; LIFF (และใส่ใน <b>Callback URL</b> ของแท็บ LINE Login ด้วยหากมี)<br />
+                        • ติ๊กเปิด Scope: <b>profile, openid</b> และเปลี่ยนสถานะ LINE Login จาก <b>Developing → Published</b> เพื่อให้ทุกเครื่องล็อกอินได้โดยไม่ติด 400 Bad Request
                       </span>
                     </div>
                     <button

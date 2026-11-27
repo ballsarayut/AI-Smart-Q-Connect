@@ -107,6 +107,14 @@ export default function App() {
               if (user?.userId) {
                 localStorage.setItem('smartq_line_uid', user.userId);
                 localStorage.setItem('smartq_line_name', user.displayName);
+                const returnPath = sessionStorage.getItem('smartq_liff_return_path');
+                if (returnPath && !(rate !== null && qid)) {
+                  sessionStorage.removeItem('smartq_liff_return_path');
+                  if (window.location.pathname !== returnPath) {
+                    window.location.replace(returnPath);
+                    return;
+                  }
+                }
               }
               setIsLiffReady(true);
             })

@@ -261,6 +261,7 @@ export default function Patient() {
   
   const [liffInitialized, setLiffInitialized] = useState(false);
   const [liffConfigured, setLiffConfigured] = useState(false);
+  const [liffIdValue, setLiffIdValue] = useState('');
   const [liffProfileName, setLiffProfileName] = useState(() => localStorage.getItem('smartq_line_name') || '');
   const [liffError, setLiffError] = useState('');
 
@@ -362,6 +363,7 @@ export default function Patient() {
         
         const cleanLiffId = sanitizeLiffId(data.line_liff_id || '');
         if (cleanLiffId) {
+          setLiffIdValue(cleanLiffId);
           setLiffConfigured(true);
           initLiff(cleanLiffId)
             .then(async () => {
@@ -378,7 +380,7 @@ export default function Patient() {
             .catch(err => {
               console.error("LIFF init error in Patient", err);
               setLiffInitialized(false);
-              setLiffError(`เชื่อมต่อ LINE LIFF ไม่สำเร็จ (${err?.message || 'ตรวจสอบ LIFF ID และ Endpoint URL'}) — สามารถกรอก User ID ด้านล่างแทนได้`);
+              setLiffError(`เชื่อมต่อ LINE LIFF ไม่สำเร็จ (${err?.message || 'กรุณาตรวจสอบ LIFF ID และ Endpoint URL ใน LINE Developers Console'})`);
             });
         }
       });
@@ -967,17 +969,17 @@ export default function Patient() {
                   />
                 </div>
 
-                {(liffConfigured || liffInitialized || liffError || lineUid) && (
+                {(liffConfigured || liffInitialized || liffError || liffProfileName || lineUid) && (
                   <div className="md:col-span-2">
                     <label className="block text-sm font-bold text-slate-700 mb-1">รับการแจ้งเตือนคิวผ่าน LINE</label>
-                    {liffProfileName ? (
+                    {liffProfileName || lineUid ? (
                       <div className="w-full border-2 border-green-200 rounded-xl p-4 bg-green-50 flex items-center justify-between gap-3 transition-all">
                         <div className="flex flex-col gap-1">
                           <div className="flex items-center gap-2 text-green-700 font-bold text-sm">
                             <CheckCircle2 className="w-5 h-5" /> เชื่อมต่อ LINE สำเร็จ
                           </div>
                           <p className="text-xs text-green-700/80 font-medium ml-7">
-                            การแจ้งเตือนคิวจะถูกส่งไปยัง <b>{liffProfileName}</b>
+                            การแจ้งเตือนคิวจะถูกส่งไปยัง <b>{liffProfileName || 'บัญชี LINE ที่เข้าสู่ระบบ'}</b>
                           </p>
                         </div>
                         <button
@@ -998,61 +1000,60 @@ export default function Patient() {
                       <div className="w-full flex flex-col gap-2">
                         <div className="w-full border-2 border-slate-200 rounded-xl p-4 bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all">
                           <div className="flex-1 min-w-0">
-                            <p className="text-xs text-slate-600 font-medium">
-                              ล็อกอินผ่าน LINE หรือกรอก LINE User ID ของคุณเพื่อรับการแจ้งเตือนคิว
+                            <p className="text-sm font-bold text-slate-700">
+                              เข้าสู่ระบบด้วย LINE เพื่อรับการแจ้งเตือนคิว
                             </p>
-                            <div className="mt-2 flex flex-col sm:flex-row sm:items-center gap-2">
-                              <input 
-                                type="text"
-                                value={lineUid}
-                                placeholder="กรอก LINE User ID (เช่น U1234567890abcdef...)" 
-                                className="border-2 border-slate-200 bg-white rounded-lg px-3 py-2 text-xs w-full sm:max-w-[300px] font-mono outline-none focus:border-teal-500"
-                                onChange={(e) => {
-                                  const val = e.target.value.trim();
-                                  setLineUid(val);
-                                  if (val) {
-                                    localStorage.setItem('smartq_line_uid', val);
-                                  } else {
-                                    localStorage.removeItem('smartq_line_uid');
-                                  }
-                                }}
-                              />
-                              {lineUid.trim().startsWith('U') && lineUid.trim().length >= 16 && (
-                                <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600 whitespace-nowrap">
-                                  <CheckCircle2 className="w-4 h-4" /> พร้อมส่งแจ้งเตือน
-                                </span>
-                              )}
-                            </div>
+                            <p className="text-xs text-slate-500 font-medium mt-0.5">
+                              กดปุ่มด้านขวาเพื่อล็อกอิน LINE ครั้งเดียว ระบบจะส่งแจ้งเตือนคิวและให้ดาวรีวิวให้โดยอัตโนมัติ
+                            </p>
                           </div>
-                          {liffInitialized && (
-                            window.self !== window.top ? (
-                              <a
-                                href={window.location.href}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="bg-[#06C755] hover:bg-[#05b34c] text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-sm whitespace-nowrap active:scale-95 transition-all inline-flex items-center justify-center gap-2 shrink-0"
-                              >
-                                เปิดแท็บใหม่เพื่อล็อกอิน LINE
-                              </a>
-                            ) : (
-                              <button 
-                                type="button"
-                                onClick={() => {
-                                  try {
-                                    setLiffError('');
-                                    liff.login({ redirectUri: window.location.href });
-                                  } catch (e: any) {
-                                    setLiffError(`ล็อกอิน LINE ไม่สำเร็จ: ${e?.message || 'กรุณาตรวจสอบ Endpoint URL ใน LINE Developers Console'}`);
-                                  }
-                                }}
-                                className="bg-[#06C755] hover:bg-[#05b34c] text-white px-4 py-2.5 rounded-xl text-sm font-bold shadow-sm whitespace-nowrap active:scale-95 transition-all inline-flex items-center justify-center gap-2 shrink-0 cursor-pointer"
-                              >
-                                ล็อกอิน LINE
-                              </button>
-                            )
-                          )}
+                          {window.self !== window.top ? (
+                            <a
+                              href={window.location.href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="bg-[#06C755] hover:bg-[#05b34c] text-white px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold shadow-sm whitespace-nowrap active:scale-95 transition-all inline-flex items-center justify-center gap-2 shrink-0"
+                            >
+                              เปิดแท็บใหม่เพื่อล็อกอิน LINE
+                            </a>
+                          ) : liffInitialized ? (
+                            <button 
+                              type="button"
+                              onClick={() => {
+                                try {
+                                  setLiffError('');
+                                  sessionStorage.setItem('smartq_liff_return_path', '/patient');
+                                  liff.login();
+                                } catch (e: any) {
+                                  setLiffError(`ล็อกอิน LINE ไม่สำเร็จ: ${e?.message || 'กรุณาตรวจสอบการตั้งค่า LINE LIFF'}`);
+                                }
+                              }}
+                              className="bg-[#06C755] hover:bg-[#05b34c] text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-sm whitespace-nowrap active:scale-95 transition-all inline-flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+                            >
+                              ล็อกอินผ่าน LINE
+                            </button>
+                          ) : liffIdValue ? (
+                            <a
+                              href={`https://liff.line.me/${liffIdValue}`}
+                              className="bg-[#06C755] hover:bg-[#05b34c] text-white px-5 py-2.5 rounded-xl text-sm font-bold shadow-sm whitespace-nowrap active:scale-95 transition-all inline-flex items-center justify-center gap-2 shrink-0"
+                            >
+                              เปิดล็อกอินผ่าน LINE
+                            </a>
+                          ) : null}
                         </div>
-                        {liffError && <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 font-semibold">{liffError}</p>}
+                        {liffError && (
+                          <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3.5 py-2.5 font-medium flex flex-col gap-1">
+                            <span className="font-bold">{liffError}</span>
+                            {liffIdValue && (
+                              <a
+                                href={`https://liff.line.me/${liffIdValue}`}
+                                className="text-teal-700 underline font-bold w-fit"
+                              >
+                                ลองเปิดผ่านลิงก์ LINE LIFF โดยตรง
+                              </a>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
