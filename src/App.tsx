@@ -23,6 +23,7 @@ import { initLiff, getSafeLiffUser, sanitizeLiffId } from './lib/liffHelper';
 export default function App() {
   const [isLiffReady, setIsLiffReady] = useState(false);
   const [isRatingFlow, setIsRatingFlow] = useState(false);
+  const [ratingQid, setRatingQid] = useState<string | null>(null);
   const [ratingQueueInfo, setRatingQueueInfo] = useState<any>(null);
   const [selectedScore, setSelectedScore] = useState<number>(0);
   const [hoverScore, setHoverScore] = useState<number>(0);
@@ -35,11 +36,20 @@ export default function App() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const rate = params.get('rate');
-    const qid = params.get('qid');
+    let rate = params.get('rate');
+    let qid = params.get('qid');
 
-    if (rate && qid) {
+    if ((!rate || !qid) && params.get('liff.state')) {
+      const stateStr = params.get('liff.state') || '';
+      const cleanState = stateStr.startsWith('?') ? stateStr.slice(1) : stateStr;
+      const stateParams = new URLSearchParams(cleanState.includes('?') ? cleanState.split('?')[1] : cleanState);
+      rate = rate || stateParams.get('rate');
+      qid = qid || stateParams.get('qid');
+    }
+
+    if (rate !== null && qid) {
       setIsRatingFlow(true);
+      setRatingQid(qid);
       const parsedRate = parseInt(rate, 10);
 
       // Load queue info independently of LIFF
@@ -50,7 +60,7 @@ export default function App() {
         })
         .then(qData => {
           setRatingQueueInfo(qData);
-          if (qData.satisfaction_score) {
+          if (qData.satisfaction_score && !(parsedRate >= 1 && parsedRate <= 5)) {
             setSelectedScore(qData.satisfaction_score);
           }
           if (qData.satisfaction_comment) {
@@ -115,8 +125,7 @@ export default function App() {
   }, []);
 
   const handleRatingSubmit = async () => {
-    const params = new URLSearchParams(window.location.search);
-    const qid = params.get('qid');
+    const qid = ratingQid || new URLSearchParams(window.location.search).get('qid');
     if (!qid || selectedScore < 1 || selectedScore > 5) {
       toast.error('กรุณาเลือกคะแนนความพึงพอใจ 1-5 ดาว');
       return;

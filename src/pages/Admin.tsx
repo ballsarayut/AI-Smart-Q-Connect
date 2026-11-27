@@ -52,7 +52,7 @@ export default function Admin() {
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [testLineLoading, setTestLineLoading] = useState(false);
-  const [testLineResult, setTestLineResult] = useState<{success?: boolean, error?: string, message?: string} | null>(null);
+  const [testLineResult, setTestLineResult] = useState<{success?: boolean, error?: string, hint?: string, details?: any[], message?: string} | null>(null);
 
   // New Service states
   const [newServiceName, setNewServiceName] = useState('');
@@ -205,7 +205,7 @@ export default function Admin() {
       });
       const data = await res.json();
       if (!res.ok) {
-        setTestLineResult({ error: data.error });
+        setTestLineResult({ error: data.error, hint: data.hint, details: data.details });
       } else {
         setTestLineResult({ success: true, message: `${data.message} (และบันทึกค่า Token / LIFF / Admin UID แล้ว)` });
       }
@@ -220,10 +220,10 @@ export default function Admin() {
     }
   };
 
-  const handleTestLineRating = async () => {
+  const handleTestLineRating = async (broadcastMode: boolean = false) => {
     const cleanToken = lineToken.trim();
     const cleanAdmin = lineAdmin.trim();
-    if (!cleanToken || !cleanAdmin) {
+    if (!cleanToken || (!cleanAdmin && !broadcastMode)) {
       setTestLineResult({ error: "โปรดระบุ LINE Channel Access Token และ Admin LINE User ID ก่อนส่งการ์ดให้ดาวทดสอบ" });
       return;
     }
@@ -245,11 +245,11 @@ export default function Admin() {
       const res = await fetch('/api/settings/test-line-rating', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cat: cleanToken, uid: cleanAdmin })
+        body: JSON.stringify({ cat: cleanToken, uid: cleanAdmin, broadcast: broadcastMode })
       });
       const data = await res.json();
       if (!res.ok) {
-        setTestLineResult({ error: data.error });
+        setTestLineResult({ error: data.error, hint: data.hint, details: data.details });
       } else {
         setTestLineResult({ success: true, message: data.message });
       }
@@ -790,7 +790,7 @@ export default function Admin() {
                       </button>
                       <button
                         type="button"
-                        onClick={handleTestLineRating}
+                        onClick={() => handleTestLineRating(false)}
                         disabled={testLineLoading}
                         className="bg-teal-600 hover:bg-teal-700 text-white px-5 py-2.5 rounded-xl font-bold text-xs uppercase tracking-widest transition-all disabled:opacity-50 cursor-pointer"
                       >
@@ -800,12 +800,31 @@ export default function Admin() {
                     {testLineResult && (
                       <div className={`p-4 rounded-xl text-xs font-medium border ${testLineResult.success ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'} w-full mt-2 animate-in fade-in zoom-in duration-300`}>
                         {testLineResult.success ? (
-                          <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4" /> {testLineResult.message}</div>
+                          <div className="flex items-center gap-2"><CheckCircle2 className="w-4 h-4 shrink-0" /> <span>{testLineResult.message}</span></div>
                         ) : (
-                          <div className="flex flex-col gap-1">
-                            <span className="font-bold flex items-center gap-1"><AlertCircle className="w-4 h-4" /> เกิดข้อผิดพลาดจากฝั่ง LINE API:</span>
-                            <span>{testLineResult.error}</span>
-                            <span className="text-red-500/80 text-[10px] mt-1 block">ตรวจสอบว่าคุณกรอก Channel Access Token ถูกต้อง และได้เพิ่ม Official Account (Bot) เป็นเพื่อนแล้ว</span>
+                          <div className="flex flex-col gap-1.5">
+                            <span className="font-bold flex items-center gap-1"><AlertCircle className="w-4 h-4 shrink-0" /> เกิดข้อผิดพลาดจากฝั่ง LINE API:</span>
+                            <span className="font-semibold">{testLineResult.error}</span>
+                            {testLineResult.details && testLineResult.details.length > 0 && (
+                              <span className="text-[11px] font-mono bg-white/70 px-2.5 py-1.5 rounded-lg border border-red-200">
+                                {testLineResult.details.map((d: any) => `${d.property || ''}: ${d.message || ''}`).join(' | ')}
+                              </span>
+                            )}
+                            <span className="text-red-700/90 text-[11px] leading-relaxed block">
+                              {testLineResult.hint || 'ตรวจสอบว่าคุณกรอก Channel Access Token ถูกต้อง และได้เพิ่ม Official Account (Bot) เป็นเพื่อนแล้ว'}
+                            </span>
+                            {lineToken.trim() && (
+                              <div className="pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleTestLineRating(true)}
+                                  disabled={testLineLoading}
+                                  className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-[11px] font-bold transition-colors cursor-pointer"
+                                >
+                                  ลองส่งการ์ดให้ดาวแบบ Broadcast (ถึงเพื่อนทุกคนของบอทนี้)
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -835,8 +854,13 @@ export default function Admin() {
                     </button>
                   </div>
                   <p className="text-[11px] text-emerald-800/80 mt-2 font-medium">
-                    นำลิงก์นี้ไปวางใน LINE Developers Console &gt; Messaging API &gt; Webhook URL และเปิด &quot;Use webhook&quot; เพื่อให้ผู้ป่วยกดดาวหรือพิมพ์รีวิวตอบกลับใน LINE Chat ได้ทันที (หากไม่ตั้งค่า Webhook ปุ่มให้ดาวและลิงก์รีวิวใน LINE ยังเปิดหน้ากรอกรีวิวผ่านเบราว์เซอร์ใน LINE ได้ปกติ)
+                    นำลิงก์นี้ไปวางใน LINE Developers Console &gt; Messaging API &gt; Webhook URL และเปิด &quot;Use webhook&quot; พร้อมตั้งโหมดตอบกลับใน LINE Official Account Manager เป็น <b>&quot;บอท (Bot)&quot;</b> (ปิด &quot;ตอบกลับอัตโนมัติ&quot;) เพื่อให้ผู้ป่วยกดดาวหรือพิมพ์รีวิวตอบกลับใน LINE Chat ได้ทันที
                   </p>
+                  {(window.location.hostname.includes('ais-dev-') || window.location.hostname.includes('ais-pre-')) && (
+                    <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mt-2 font-medium">
+                      💡 <b>หมายเหตุโหมดพรีวิว:</b> ลิงก์พรีวิว ({window.location.hostname.split('-')[1]}) มีระบบตรวจสอบสิทธิ์ก่อนเข้าถึงเซิร์ฟเวอร์ ทำให้ LINE Webhook ภายนอกยังยิงเข้ามาไม่ได้จนกว่าจะกดปุ่ม <b>Publish</b> — ระหว่างทดสอบในโหมดพรีวิว ปุ่มดาว ★ 1–5 และปุ่มรีวิวบนการ์ด LINE จะเปิดหน้ากรอกดาวและพิมพ์คอมเมนต์ผ่าน LIFF ใน LINE ให้ใช้งานได้ทันทีครับ
+                    </p>
+                  )}
                 </div>
               </div>
               
