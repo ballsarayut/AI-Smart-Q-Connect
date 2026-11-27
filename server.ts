@@ -28,8 +28,8 @@ app.use((req, _res, next) => {
   next();
 });
 
-// Initialize SQLite database (in-memory for prototype, normally a file like app.db)
-const db = new Database(':memory:');
+// Initialize persistent SQLite database so settings, queues, and reviews survive server restarts
+const db = new Database(path.join(process.cwd(), 'smartq.db'));
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -111,8 +111,8 @@ db.exec(`
 
 try { db.prepare("ALTER TABLE line_logs ADD COLUMN sender TEXT DEFAULT 'bot'").run(); } catch (e) {}
 
-// Seed some initial data
-const insertService = db.prepare('INSERT INTO services (id, service_name, estimated_minutes, color_code, is_active) VALUES (?, ?, ?, ?, ?)');
+// Seed some initial data (idempotent across restarts)
+const insertService = db.prepare('INSERT OR IGNORE INTO services (id, service_name, estimated_minutes, color_code, is_active) VALUES (?, ?, ?, ?, ?)');
 insertService.run('service_1', 'รับยาโรคประจำตัว', 5, 'bg-blue-500', 1);
 insertService.run('service_2', 'ทำแผล', 10, 'bg-rose-500', 1);
 insertService.run('service_3', 'พบแพทย์/พยาบาล', 15, 'bg-green-500', 1);
@@ -701,27 +701,20 @@ function generateQueueNumber(serviceId: string, isFastTrack: boolean = false) {
 }
 
 function buildCompletedRatingLinePayload(queue: any) {
-  const liffRecord = db.prepare("SELECT value FROM system_settings WHERE key = 'line_liff_id'").get() as any;
-  const liffId = normalizeLiffId(liffRecord?.value || '');
-  const baseUrl = (detectedAppUrl || process.env.APP_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
-  const isPreviewProxy =
-    !baseUrl ||
-    baseUrl.includes('ais-dev-') ||
-    baseUrl.includes('ais-pre-') ||
-    baseUrl.includes('localhost') ||
-    baseUrl.includes('127.0.0.1');
+  const rawBaseUrl = (detectedAppUrl || process.env.APP_URL || `http://localhost:${PORT}`).replace(/\/$/, '');
+  const formBaseUrl = rawBaseUrl.includes('ais-dev-')
+    ? rawBaseUrl.replace('ais-dev-', 'ais-pre-')
+    : rawBaseUrl;
 
   const getRateUrl = (score: number) =>
-    liffId
-      ? `https://liff.line.me/${liffId}?rate=${score}&qid=${encodeURIComponent(queue.id)}`
-      : `${baseUrl}/?rate=${score}&qid=${encodeURIComponent(queue.id)}`;
+    `${formBaseUrl}/?rate=${score}&qid=${encodeURIComponent(queue.id)}&qn=${encodeURIComponent(queue.queue_number || '')}&sn=${encodeURIComponent(queue.service_name || '')}`;
 
   const text = `✅ บริการเสร็จสิ้นเรียบร้อย (AI Smart Q Connect • รพ.สต.อัจฉริยะ)
 • หมายเลขคิว: ${queue.queue_number}
 • บริการ: ${queue.service_name}
 👉 รพ.สต. ขอขอบพระคุณที่เข้ารับบริการ ขอให้ท่านมีสุขภาพแข็งแรง ปราศจากโรคภัยค่ะ
 
-🌟 กดให้ดาวด้านล่าง หรือพิมพ์รีวิวตอบกลับในแชทนี้ได้เลยค่ะ (เช่น "5 ดาว บริการดีมาก") 👇`;
+⭐ แตะดาวด้านล่าง หรือกดปุ่มเพื่อกรอกคะแนนและความคิดเห็นผ่านแบบฟอร์มได้เลยค่ะ`;
 
   const starTiles = [1, 2, 3, 4, 5].map((s) => ({
     type: 'box',
@@ -738,18 +731,11 @@ function buildCompletedRatingLinePayload(queue: any) {
     borderColor: '#FCD34D',
     justifyContent: 'center',
     alignItems: 'center',
-    action: isPreviewProxy
-      ? {
-          type: 'uri',
-          label: `${s} ดาว`,
-          uri: getRateUrl(s)
-        }
-      : {
-          type: 'postback',
-          label: `${s} ดาว`,
-          data: `action=rate&qid=${queue.id}&score=${s}`,
-          displayText: `ให้คะแนน ${s} ดาว`
-        },
+    action: {
+      type: 'uri',
+      label: `${s} ดาว`,
+      uri: getRateUrl(s)
+    },
     contents: [
       {
         type: 'text',
@@ -770,48 +756,9 @@ function buildCompletedRatingLinePayload(queue: any) {
     ]
   }));
 
-  const footerContents: any[] = isPreviewProxy
-    ? [
-        {
-          type: 'button',
-          style: 'primary',
-          color: '#06C755',
-          height: 'sm',
-          action: {
-            type: 'uri',
-            label: '⭐ กดให้ดาว & พิมพ์ความคิดเห็น',
-            uri: getRateUrl(0)
-          }
-        }
-      ]
-    : [
-        {
-          type: 'button',
-          style: 'primary',
-          color: '#06C755',
-          height: 'sm',
-          action: {
-            type: 'postback',
-            label: '💬 เขียนความคิดเห็นในแชท',
-            data: `action=prompt_comment&qid=${queue.id}`,
-            displayText: 'เขียนความคิดเห็นเพิ่มเติม'
-          }
-        },
-        {
-          type: 'button',
-          style: 'secondary',
-          height: 'sm',
-          action: {
-            type: 'uri',
-            label: '⭐ เปิดฟอร์มให้ดาว & คอมเมนต์',
-            uri: getRateUrl(0)
-          }
-        }
-      ];
-
   const flexMessage: any = {
     type: 'flex',
-    altText: `✅ คิว ${queue.queue_number} เสร็จสิ้นแล้ว — กรุณากดให้ดาวและพิมพ์ความคิดเห็น`,
+    altText: `✅ คิว ${queue.queue_number} เสร็จสิ้นแล้ว — แตะให้ดาวและเขียนความคิดเห็นผ่านแบบฟอร์ม`,
     contents: {
       type: 'bubble',
       size: 'mega',
@@ -877,9 +824,7 @@ function buildCompletedRatingLinePayload(queue: any) {
           },
           {
             type: 'text',
-            text: isPreviewProxy
-              ? 'แตะดาว 1–5 ด้านบน หรือกดปุ่มด้านล่างเพื่อเลือกดาวและพิมพ์ความคิดเห็นส่งเข้าระบบได้เลยค่ะ'
-              : 'แตะดาวด้านบน หรือพิมพ์คะแนนพร้อมความคิดเห็นส่งมาในแชทนี้ได้เลย เช่น "5 ดาว พยาบาลใจดีมาก"',
+            text: 'แตะดาว 1–5 ด้านบน หรือกดปุ่มด้านล่างเพื่อเปิดแบบฟอร์มให้ดาวและเขียนความคิดเห็น',
             size: 'xxs',
             color: '#64748B',
             wrap: true,
@@ -892,24 +837,22 @@ function buildCompletedRatingLinePayload(queue: any) {
         layout: 'vertical',
         spacing: 'sm',
         paddingAll: '12px',
-        contents: footerContents
+        contents: [
+          {
+            type: 'button',
+            style: 'primary',
+            color: '#06C755',
+            height: 'sm',
+            action: {
+              type: 'uri',
+              label: '⭐ ให้ดาวและเขียนความคิดเห็น',
+              uri: getRateUrl(0)
+            }
+          }
+        ]
       }
     }
   };
-
-  if (!isPreviewProxy) {
-    flexMessage.quickReply = {
-      items: [5, 4, 3, 2, 1].map((s) => ({
-        type: 'action',
-        action: {
-          type: 'postback',
-          label: '⭐'.repeat(s),
-          data: `action=rate&qid=${queue.id}&score=${s}`,
-          displayText: `ให้คะแนน ${s} ดาว`
-        }
-      }))
-    };
-  }
 
   return { text, lineMessages: [flexMessage] };
 }

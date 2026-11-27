@@ -38,6 +38,8 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     let rate = params.get('rate');
     let qid = params.get('qid');
+    let qn = params.get('qn');
+    let sn = params.get('sn');
 
     if ((!rate || !qid) && params.get('liff.state')) {
       const stateStr = params.get('liff.state') || '';
@@ -45,18 +47,33 @@ export default function App() {
       const stateParams = new URLSearchParams(cleanState.includes('?') ? cleanState.split('?')[1] : cleanState);
       rate = rate || stateParams.get('rate');
       qid = qid || stateParams.get('qid');
+      qn = qn || stateParams.get('qn');
+      sn = sn || stateParams.get('sn');
     }
 
     if (rate !== null && qid) {
       setIsRatingFlow(true);
       setRatingQid(qid);
+      if (qn) {
+        setRatingQueueInfo((prev: any) => prev || { id: qid, queue_number: qn, service_name: sn || 'รับบริการ รพ.สต.' });
+      }
       const parsedRate = parseInt(rate, 10);
+
+      const safeParseJson = async (res: Response) => {
+        const text = await res.text();
+        try {
+          return JSON.parse(text);
+        } catch {
+          return null;
+        }
+      };
 
       // Load queue info independently of LIFF
       fetch(`/api/queues/${encodeURIComponent(qid)}`)
-        .then(res => {
-          if (!res.ok) throw new Error('ไม่พบข้อมูลคิวนี้ในระบบ (อาจเป็นคิวจากรอบการรันก่อนหน้า)');
-          return res.json();
+        .then(async res => {
+          const qData = await safeParseJson(res);
+          if (!res.ok || !qData) throw new Error(qData?.error || 'ไม่พบข้อมูลคิวนี้ในระบบ (อาจเป็นคิวจากรอบการรันก่อนหน้า)');
+          return qData;
         })
         .then(qData => {
           setRatingQueueInfo(qData);
@@ -81,8 +98,8 @@ export default function App() {
           body: JSON.stringify({ score: parsedRate })
         })
           .then(async res => {
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'บันทึกคะแนนไม่สำเร็จ');
+            const data = await safeParseJson(res);
+            if (!res.ok || !data) throw new Error(data?.error || 'บันทึกคะแนนไม่สำเร็จ');
             setRatingQueueInfo(data);
             setRatingSubmitted(true);
           })
@@ -93,9 +110,12 @@ export default function App() {
       } else {
         setRatingSubmitted(true);
       }
+
+      setIsLiffReady(true);
+      return;
     }
 
-    // Globally process LIFF auth callbacks across all pages
+    // Globally process LIFF auth callbacks across all non-rating pages
     fetch('/api/settings')
       .then(res => res.json())
       .then(data => {
@@ -108,7 +128,7 @@ export default function App() {
                 localStorage.setItem('smartq_line_uid', user.userId);
                 localStorage.setItem('smartq_line_name', user.displayName);
                 const returnPath = sessionStorage.getItem('smartq_liff_return_path');
-                if (returnPath && !(rate !== null && qid)) {
+                if (returnPath) {
                   sessionStorage.removeItem('smartq_liff_return_path');
                   if (window.location.pathname !== returnPath) {
                     window.location.replace(returnPath);
@@ -146,15 +166,21 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ score: selectedScore, comment: reviewComment })
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'ไม่สามารถส่งผลประเมินได้');
+      const text = await res.text();
+      let data: any = null;
+      try {
+        data = JSON.parse(text);
+      } catch {}
+      if (!res.ok || !data) throw new Error(data?.error || 'ไม่สามารถส่งผลประเมินได้');
 
       setRatingQueueInfo(data);
       setCommentSubmitted(true);
       toast.success('บันทึกผลการประเมินเรียบร้อยแล้ว');
-      if (liff.isInClient()) {
-        setTimeout(() => liff.closeWindow(), 1800);
-      }
+      try {
+        if (liff.isInClient()) {
+          setTimeout(() => liff.closeWindow(), 1800);
+        }
+      } catch {}
     } catch (e: any) {
       toast.error(e.message || 'เกิดข้อผิดพลาดในการบันทึกข้อมูล');
     } finally {

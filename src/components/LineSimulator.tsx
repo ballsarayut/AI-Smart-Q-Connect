@@ -485,26 +485,6 @@ export default function LineSimulator() {
                   )}
                   <div ref={chatEndRef} />
                 </div>
-
-                {/* Chat Reply Input Bar */}
-                <form onSubmit={submitChatReply} className="bg-white border-t border-slate-200 px-3 py-2 flex items-center gap-2 shrink-0">
-                  <input
-                    type="text"
-                    value={chatReplyText}
-                    onChange={(e) => setChatReplyText(e.target.value)}
-                    placeholder='พิมพ์รีวิว เช่น "5 ดาว บริการดีมาก"...'
-                    maxLength={160}
-                    className="flex-1 bg-slate-100 border border-slate-200 rounded-full px-3.5 py-1.5 text-xs text-slate-800 outline-none focus:border-[#06C755]"
-                  />
-                  <button
-                    type="submit"
-                    disabled={isSendingReply || !chatReplyText.trim()}
-                    className="p-2 rounded-full bg-[#06C755] hover:bg-[#05b04b] text-white transition-colors disabled:opacity-40 cursor-pointer shrink-0"
-                    title="ส่งข้อความรีวิว"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                  </button>
-                </form>
               </div>
             )}
           </div>
